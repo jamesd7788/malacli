@@ -1,0 +1,13 @@
+/target/
+
+# Local/private Bible texts and experiments. Keep licensed translations out of git.
+/data/private/
+/data/local/
+*.local.xml
+
+# Editor/OS noise
+.DS_Store
+*.swp
+
+# Download artifacts; extracted app data stays tracked.
+/data/raw/*.zip
