@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 mod app;
 mod bible;
 mod config;
