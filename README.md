@@ -4,6 +4,8 @@ A fast, keyboard-first terminal Bible reader in Rust with `ratatui`, real Bible 
 
 The current product direction is reader-first with study power: beautiful reading, fast passage movement, a contextual side pane, and no network dependency in the core app.
 
+<img width="2298" height="1322" alt="image" src="https://github.com/user-attachments/assets/21711638-0863-47c3-a757-2a529c23f561" />
+
 ## Features
 
 - Paragraph-style reader with inline verse numbers and a focused reading column
