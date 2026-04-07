@@ -5,6 +5,8 @@ mod bible;
 mod config;
 mod data;
 mod event;
+#[allow(dead_code)]
+mod note;
 mod session;
 mod translation;
 mod tui;
@@ -69,9 +71,35 @@ fn run(tui: &mut Tui) -> Result<()> {
             event::Event::Key(key) => app.handle_key_event(key),
             event::Event::Resize | event::Event::Tick => app.poll_background_work(),
         }
+
+        if let Some(path) = app.editor_request.take() {
+            open_in_editor(tui, &mut app, &path)?;
+        }
     }
 
     let _ = app.save_session();
+    Ok(())
+}
+
+fn open_in_editor(tui: &mut Tui, app: &mut App, path: &std::path::Path) -> Result<()> {
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+    ratatui::restore();
+    let status = std::process::Command::new(&editor).arg(path).status();
+    let terminal = ratatui::init();
+    *tui = Tui::new(terminal);
+    match status {
+        Ok(exit) if exit.success() => {
+            app.reload_notes();
+            app.status = "Note saved.".to_string();
+        }
+        Ok(_) => {
+            app.reload_notes();
+            app.status = "Editor exited with non-zero status.".to_string();
+        }
+        Err(error) => {
+            app.status = format!("Failed to open {editor}: {error}");
+        }
+    }
     Ok(())
 }
 
@@ -119,10 +147,12 @@ READER CONTROLS
   g        jump to a passage (e.g. john 3:16, gen 1, 1 cor 13)
   /        search scripture
   x        show cross references
+  n        show notes for current chapter
+  a        create a new note at current verse
   tab      toggle reader / side pane focus
   j / k    move verse (reader) or selection (side pane)
   h / l    previous / next chapter
-  enter    open selected search hit or cross reference
+  enter    open selected item (search hit, cross ref, or note in $EDITOR)
   u / p    back / forward in history
   t        cycle loaded translations
   esc      cancel input

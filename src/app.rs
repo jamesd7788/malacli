@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::bible::{
     Bible, CrossReference, SearchHit, Verse, VerseId, book_abbrev, parse_reference, suggest_books,
 };
+use crate::note::{self, Note, NoteIndex};
 use crate::session;
 use crate::translation::{TranslationEntry, TranslationRegistry};
 
@@ -28,6 +29,8 @@ pub enum Focus {
 pub enum SidePanel {
     CrossReferences,
     Search,
+    #[serde(alias = "Notes")]
+    Notes,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,6 +60,12 @@ pub struct App {
     pub cross_references: Vec<CrossReference>,
     pub selected_search_result: ListState,
     pub selected_cross_reference: ListState,
+    pub note_index: NoteIndex,
+    pub chapter_notes: Vec<Note>,
+    pub selected_note: ListState,
+    pub editor_request: Option<std::path::PathBuf>,
+    pub visual_anchor: Option<VerseId>,
+    pub pinned_note: Option<std::path::PathBuf>,
     history: VecDeque<VerseId>,
     history_index: usize,
     load_rx: Option<Receiver<TranslationLoadResult>>,
@@ -121,6 +130,17 @@ impl App {
 
         let (history, history_index) = restore_history(saved_session.as_ref(), current_verse);
 
+        let note_index = NoteIndex::load(&note::notes_dir());
+        let chapter_notes = note_index
+            .notes_for_chapter(current_verse.book, current_verse.chapter)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut selected_note = ListState::default();
+        if !chapter_notes.is_empty() {
+            selected_note.select(Some(0));
+        }
+
         let mut app = Self {
             is_running: true,
             translations,
@@ -136,12 +156,17 @@ impl App {
                 .unwrap_or(SidePanel::CrossReferences),
             mode: InputMode::Normal,
             input: String::new(),
-            status: "Ready. g jump, / search, tab changes pane, enter opens selected item."
-                .to_string(),
+            status: "Ready. g jump, / search, n notes, tab changes pane.".to_string(),
             search_results: Vec::new(),
             cross_references,
             selected_search_result: ListState::default(),
             selected_cross_reference,
+            note_index,
+            chapter_notes,
+            selected_note,
+            editor_request: None,
+            visual_anchor: None,
+            pinned_note: None,
             history,
             history_index,
             load_rx: None,
@@ -200,6 +225,7 @@ impl App {
                     format!("Search / {}", self.input)
                 }
             }
+            SidePanel::Notes => "Notes".to_string(),
         }
     }
 
@@ -207,7 +233,14 @@ impl App {
         match self.side_panel {
             SidePanel::CrossReferences => format!("{} refs", self.cross_references.len()),
             SidePanel::Search => format!("{} hits", self.search_results.len()),
+            SidePanel::Notes => format!("{} notes", self.chapter_notes.len()),
         }
+    }
+
+    pub fn selected_note(&self) -> Option<&Note> {
+        self.selected_note
+            .selected()
+            .and_then(|index| self.chapter_notes.get(index))
     }
 
     pub fn history_items(&self) -> Vec<HistoryItem> {
@@ -300,11 +333,36 @@ impl App {
                 self.enter_mode(InputMode::Jump, Focus::Reader, "Jump to passage")
             }
             (KeyCode::Char('x'), _) => self.show_cross_references(),
+            (KeyCode::Char('n'), _) => self.show_notes(),
+            (KeyCode::Char('a'), _) => self.create_note_at_verse(),
+            (KeyCode::Char('P'), KeyModifiers::SHIFT) => self.toggle_pin_note(),
             (KeyCode::Char('t'), _) => self.next_translation(),
-            (KeyCode::Char('j'), _) | (KeyCode::Down, _) => self.move_selection(1),
-            (KeyCode::Char('k'), _) | (KeyCode::Up, _) => self.move_selection(-1),
-            (KeyCode::Char('h'), _) | (KeyCode::Left, _) => self.previous_chapter(),
-            (KeyCode::Char('l'), _) | (KeyCode::Right, _) => self.next_chapter(),
+            (KeyCode::Char('J'), KeyModifiers::SHIFT) | (KeyCode::Down, KeyModifiers::SHIFT) => {
+                self.visual_extend(1)
+            }
+            (KeyCode::Char('K'), KeyModifiers::SHIFT) | (KeyCode::Up, KeyModifiers::SHIFT) => {
+                self.visual_extend(-1)
+            }
+            (KeyCode::Char('j'), _) | (KeyCode::Down, _) => {
+                self.visual_anchor = None;
+                self.move_selection(1);
+            }
+            (KeyCode::Char('k'), _) | (KeyCode::Up, _) => {
+                self.visual_anchor = None;
+                self.move_selection(-1);
+            }
+            (KeyCode::Char('h'), _) | (KeyCode::Left, _) => {
+                self.visual_anchor = None;
+                self.previous_chapter();
+            }
+            (KeyCode::Char('l'), _) | (KeyCode::Right, _) => {
+                self.visual_anchor = None;
+                self.next_chapter();
+            }
+            (KeyCode::Esc, _) => {
+                self.visual_anchor = None;
+                self.status = "Selection cleared.".to_string();
+            }
             (KeyCode::Enter, _) => self.open_selection(),
             _ => {}
         }
@@ -364,6 +422,197 @@ impl App {
         self.status =
             "Cross references focused. j/k move through the index, enter opens the selected verse."
                 .to_string();
+    }
+
+    fn show_notes(&mut self) {
+        self.refresh_notes();
+        self.side_panel = SidePanel::Notes;
+        self.focus = Focus::Side;
+        let count = self.chapter_notes.len();
+        self.status = format!(
+            "{count} note{} for this chapter. enter opens in $EDITOR, a creates new.",
+            if count == 1 { "" } else { "s" }
+        );
+    }
+
+    fn create_note_at_verse(&mut self) {
+        // If pinned, always add to pinned note
+        if self.pinned_note.is_some() {
+            self.add_range_to_pinned();
+            return;
+        }
+
+        // If notes pane focused with a note selected, tag current verse to that note
+        if self.focus == Focus::Side
+            && self.side_panel == SidePanel::Notes
+            && self.selected_note.selected().is_some()
+        {
+            self.tag_verse_to_selected_note();
+            return;
+        }
+
+        // Create new note
+        let range = self.selected_verse_range();
+        let verse_texts: Vec<(VerseId, String)> = range
+            .iter()
+            .filter_map(|&id| self.bible().verse(id).map(|v| (id, v.text.clone())))
+            .collect();
+        let quotes: Vec<(VerseId, &str)> = verse_texts
+            .iter()
+            .map(|(id, text)| (*id, text.as_str()))
+            .collect();
+        match self.note_index.create_note_ranged(&range, &quotes) {
+            Ok(path) => {
+                self.editor_request = Some(path);
+                let label = range_label(&range);
+                self.status = format!("Creating note for {label}...");
+                self.visual_anchor = None;
+            }
+            Err(error) => {
+                self.status = format!("Failed to create note: {error}");
+            }
+        }
+    }
+
+    fn toggle_pin_note(&mut self) {
+        // If already pinned, unpin
+        if self.pinned_note.is_some() {
+            self.pinned_note = None;
+            self.status = "Note unpinned.".to_string();
+            return;
+        }
+
+        // Pin selected note from side pane
+        if self.focus == Focus::Side && self.side_panel == SidePanel::Notes {
+            if let Some(index) = self.selected_note.selected() {
+                if let Some(note) = self.chapter_notes.get(index) {
+                    self.pinned_note = Some(note.path.clone());
+                    let preview = note.body.lines().next().unwrap_or("(empty)");
+                    self.status = format!("Pinned: {preview}. a adds verses, P unpins.");
+                    return;
+                }
+            }
+        }
+
+        self.status = "Select a note in the notes pane (n) to pin it.".to_string();
+    }
+
+    fn add_range_to_pinned(&mut self) {
+        let Some(pinned_path) = self.pinned_note.clone() else {
+            return;
+        };
+        let range = self.selected_verse_range();
+        let verse_texts: Vec<(VerseId, String)> = range
+            .iter()
+            .filter_map(|&id| self.bible().verse(id).map(|v| (id, v.text.clone())))
+            .collect();
+
+        // Load the pinned note from disk
+        let result = if verse_texts.len() <= 1 {
+            let (vid, text) = verse_texts
+                .first()
+                .map(|(id, t)| (*id, Some(t.as_str())))
+                .unwrap_or((self.current_verse, None));
+            self.note_index
+                .add_verse_to_note_by_path(&pinned_path, vid, text)
+        } else {
+            let quotes: Vec<(VerseId, &str)> = verse_texts
+                .iter()
+                .map(|(id, text)| (*id, text.as_str()))
+                .collect();
+            self.note_index
+                .add_range_to_note_by_path(&pinned_path, &quotes)
+        };
+
+        match result {
+            Ok(()) => {
+                let label = range_label(&range);
+                self.editor_request = Some(pinned_path);
+                self.status = format!("Added {label} to pinned note.");
+                self.visual_anchor = None;
+            }
+            Err(error) => {
+                self.status = format!("Failed to add to pinned note: {error}");
+            }
+        }
+    }
+
+    fn tag_verse_to_selected_note(&mut self) {
+        let Some(index) = self.selected_note.selected() else {
+            return;
+        };
+        let Some(note) = self.chapter_notes.get(index) else {
+            return;
+        };
+        let verse_text = self
+            .bible()
+            .verse(self.current_verse)
+            .map(|v| v.text.clone());
+        match self
+            .note_index
+            .add_verse_to_note(note, self.current_verse, verse_text.as_deref())
+        {
+            Ok(()) => {
+                let path = note.path.clone();
+                self.editor_request = Some(path);
+                self.status = format!(
+                    "Tagged {} to note, opening editor...",
+                    self.current_verse.display()
+                );
+            }
+            Err(error) => {
+                self.status = format!("Failed to tag verse: {error}");
+            }
+        }
+    }
+
+    fn visual_extend(&mut self, delta: isize) {
+        if self.focus != Focus::Reader {
+            return;
+        }
+        if self.visual_anchor.is_none() {
+            self.visual_anchor = Some(self.current_verse);
+        }
+        self.move_reader(delta);
+        let anchor = self.visual_anchor.unwrap();
+        let (start, end) = ordered_range(anchor, self.current_verse);
+        self.status = format!(
+            "Selected {}-{} (Shift+j/k extend, a note, esc cancel)",
+            start.display(),
+            end.verse
+        );
+    }
+
+    pub fn selected_verse_range(&self) -> Vec<VerseId> {
+        let anchor = match self.visual_anchor {
+            Some(a) => a,
+            None => return vec![self.current_verse],
+        };
+        let chapter = self.current_chapter();
+        let (start, end) = ordered_range(anchor, self.current_verse);
+        chapter
+            .iter()
+            .filter(|v| v.id >= start && v.id <= end)
+            .map(|v| v.id)
+            .collect()
+    }
+
+    pub fn reload_notes(&mut self) {
+        self.note_index.reload();
+        self.refresh_notes();
+    }
+
+    fn refresh_notes(&mut self) {
+        self.chapter_notes = self
+            .note_index
+            .notes_for_chapter(self.current_verse.book, self.current_verse.chapter)
+            .into_iter()
+            .cloned()
+            .collect();
+        self.selected_note = ListState::default();
+        if !self.chapter_notes.is_empty() {
+            self.selected_note.select(Some(0));
+        }
     }
 
     fn handle_input_mode(&mut self, key: KeyEvent) {
@@ -448,6 +697,9 @@ impl App {
                     self.cross_references.len(),
                     delta,
                 ),
+                SidePanel::Notes => {
+                    move_list_state(&mut self.selected_note, self.chapter_notes.len(), delta)
+                }
             },
         }
     }
@@ -500,6 +752,14 @@ impl App {
                         }
                     }
                 }
+                SidePanel::Notes => {
+                    if let Some(index) = self.selected_note.selected() {
+                        if let Some(note) = self.chapter_notes.get(index) {
+                            self.editor_request = Some(note.path.clone());
+                            self.status = "Opening note in editor...".to_string();
+                        }
+                    }
+                }
             },
         }
     }
@@ -513,6 +773,7 @@ impl App {
         self.ensure_active_verse_loaded();
         self.focus = Focus::Reader;
         self.refresh_cross_references();
+        self.refresh_notes();
         self.status = status;
     }
 
@@ -605,6 +866,10 @@ impl App {
                 }
                 SidePanel::CrossReferences => {
                     "Cross references focused. j/k moves the reference index, enter opens the selected verse."
+                        .to_string()
+                }
+                SidePanel::Notes => {
+                    "Notes focused. j/k moves, enter opens in $EDITOR, a creates new note."
                         .to_string()
                 }
             },
@@ -730,15 +995,27 @@ impl App {
         &self,
         viewport_height: usize,
         selected_line_top: usize,
+        selected_line_bottom: usize,
         total_lines: usize,
     ) -> usize {
         let max_scroll = total_lines.saturating_sub(viewport_height);
-        let target = if selected_line_top <= READER_SCROLL_MARGIN || viewport_height == 0 {
+        if viewport_height == 0 {
+            return 0;
+        }
+        // If bottom of selection would be off screen, scroll to keep it visible
+        let bottom = if selected_line_bottom > 0 {
+            selected_line_bottom
+        } else {
+            selected_line_top
+        };
+        let bottom_scroll =
+            bottom.saturating_sub(viewport_height.saturating_sub(READER_SCROLL_MARGIN + 1));
+        let top_scroll = if selected_line_top <= READER_SCROLL_MARGIN {
             0
         } else {
             selected_line_top.saturating_sub(READER_SCROLL_MARGIN)
         };
-        target.min(max_scroll)
+        top_scroll.max(bottom_scroll).min(max_scroll)
     }
 
     pub fn selected_search_hit(&self) -> Option<&SearchHit> {
@@ -823,6 +1100,32 @@ fn move_list_state(state: &mut ListState, len: usize, delta: isize) {
         (current + delta as usize) % len
     };
     state.select(Some(next));
+}
+
+fn ordered_range(a: VerseId, b: VerseId) -> (VerseId, VerseId) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+fn range_label(verses: &[VerseId]) -> String {
+    if verses.is_empty() {
+        return String::new();
+    }
+    let first = verses[0];
+    if verses.len() == 1 {
+        return first.display();
+    }
+    let last = verses[verses.len() - 1];
+    if first.book == last.book && first.chapter == last.chapter {
+        format!(
+            "{} {}:{}-{}",
+            book_abbrev(first.book),
+            first.chapter,
+            first.verse,
+            last.verse
+        )
+    } else {
+        format!("{} - {}", first.display(), last.display())
+    }
 }
 
 #[cfg(test)]

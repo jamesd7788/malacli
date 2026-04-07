@@ -969,7 +969,7 @@ pub fn parse_reference(input: &str) -> Option<VerseId> {
     })
 }
 
-fn book_index_by_osis(osis: &str) -> Option<usize> {
+pub fn book_index_by_osis(osis: &str) -> Option<usize> {
     BOOKS
         .iter()
         .position(|book| book.osis.eq_ignore_ascii_case(osis))

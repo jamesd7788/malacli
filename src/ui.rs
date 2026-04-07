@@ -175,6 +175,7 @@ fn render_header(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let side_label = match app.side_panel {
         SidePanel::CrossReferences => " Side: Cross Refs ",
         SidePanel::Search => " Side: Search ",
+        SidePanel::Notes => " Side: Notes ",
     };
 
     let mut tabs_spans = vec![
@@ -205,6 +206,13 @@ fn render_header(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
         Span::styled("History ", theme.fg(theme.accent)),
     ];
     tabs_spans.extend(history_spans(app, theme));
+    if app.pinned_note.is_some() {
+        tabs_spans.push(Span::raw("   "));
+        tabs_spans.push(Span::styled(
+            "PINNED",
+            theme.fg(theme.strong).add_modifier(Modifier::BOLD),
+        ));
+    }
     let tabs_line = Line::from(tabs_spans);
     let tabs_widget = Paragraph::new(tabs_line).block(
         Block::default()
@@ -279,6 +287,7 @@ fn render_reader(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let scroll = app.effective_reader_scroll(
         viewport_height,
         reader_view.selected_line_top,
+        reader_view.selected_line_bottom,
         reader_view.lines.len(),
     ) as u16;
     let paragraph = Paragraph::new(reader_view.lines).scroll((scroll, 0)).block(
@@ -299,6 +308,7 @@ fn render_reader(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
 struct ReaderView {
     lines: Vec<Line<'static>>,
     selected_line_top: usize,
+    selected_line_bottom: usize,
 }
 
 #[derive(Clone)]
@@ -309,28 +319,33 @@ struct StyledWord {
 }
 
 fn build_reader_view(app: &App, width: usize, left_pad: usize, theme: Theme) -> ReaderView {
+    let selected = app.selected_verse_range();
     build_chapter_context_view(
         app.current_chapter(),
         app.current_verse,
         app.current_translation(),
         &[],
+        &selected,
         width,
         left_pad,
         theme,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_chapter_context_view(
     chapter: &[Verse],
     current: crate::bible::VerseId,
     translation: String,
     search_terms: &[String],
+    selected_verses: &[crate::bible::VerseId],
     width: usize,
     left_pad: usize,
     theme: Theme,
 ) -> ReaderView {
     let mut lines = Vec::new();
     let mut selected_line_top = 0usize;
+    let mut selected_line_bottom = 0usize;
     let title = format!(
         "{} {}",
         book_name(current.book).to_ascii_uppercase(),
@@ -357,11 +372,14 @@ fn build_chapter_context_view(
             lines.push(Line::raw(""));
         }
 
-        let words = paragraph_words(paragraph, current, search_terms, theme);
+        let words = paragraph_words(paragraph, current, search_terms, selected_verses, theme);
         let wrapped = wrap_styled_words(&words, width, left_pad, theme);
         for line in wrapped {
-            if line.contains_selected && selected_line_top == 0 {
-                selected_line_top = lines.len();
+            if line.contains_selected {
+                if selected_line_top == 0 {
+                    selected_line_top = lines.len();
+                }
+                selected_line_bottom = lines.len();
             }
             lines.push(line.line);
         }
@@ -370,6 +388,7 @@ fn build_chapter_context_view(
     ReaderView {
         lines,
         selected_line_top,
+        selected_line_bottom,
     }
 }
 
@@ -377,12 +396,13 @@ fn paragraph_words(
     verses: &[Verse],
     current: crate::bible::VerseId,
     search_terms: &[String],
+    selected_verses: &[crate::bible::VerseId],
     theme: Theme,
 ) -> Vec<StyledWord> {
     let mut words = Vec::new();
 
     for verse in verses {
-        let selected = verse.id == current;
+        let selected = selected_verses.contains(&verse.id) || verse.id == current;
         let number_style = if selected {
             theme.fg(theme.title_focus).add_modifier(Modifier::BOLD)
         } else {
@@ -620,6 +640,7 @@ fn side_preview_view(
                                 target,
                                 app.current_translation(),
                                 &[],
+                                &[target],
                                 width,
                                 left_pad,
                                 theme,
@@ -653,6 +674,7 @@ fn side_preview_view(
                             hit.verse,
                             app.current_translation(),
                             &terms,
+                            &[hit.verse],
                             width,
                             left_pad,
                             theme,
@@ -669,6 +691,48 @@ fn side_preview_view(
                 message_preview("No search result selected.", theme),
             )
         }
+        SidePanel::Notes => {
+            if let Some(note) = app.selected_note() {
+                let mut lines = Vec::new();
+                if !note.verses.is_empty() {
+                    let refs: Vec<String> = note.verses.iter().map(|v| v.display()).collect();
+                    lines.push(Line::from(Span::styled(
+                        refs.join(", "),
+                        theme.fg(theme.accent),
+                    )));
+                    lines.push(Line::from(""));
+                }
+                for text_line in note.body.lines() {
+                    let wrapped = wrap_text(text_line, width);
+                    for w in wrapped {
+                        let pad = " ".repeat(left_pad);
+                        lines.push(Line::from(Span::styled(
+                            format!("{pad}{w}"),
+                            theme.fg(theme.text),
+                        )));
+                    }
+                }
+                if lines.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "(empty note — press enter to edit)",
+                        theme.fg(theme.muted),
+                    )));
+                }
+                (
+                    "Note Preview".to_string(),
+                    ReaderView {
+                        lines,
+                        selected_line_top: 0,
+                        selected_line_bottom: 0,
+                    },
+                )
+            } else {
+                (
+                    "Note Preview".to_string(),
+                    message_preview("No note selected. Press a to create one.", theme),
+                )
+            }
+        }
     }
 }
 
@@ -679,6 +743,7 @@ fn message_preview(message: &str, theme: Theme) -> ReaderView {
             theme.fg(theme.muted),
         ))],
         selected_line_top: 0,
+        selected_line_bottom: 0,
     }
 }
 
@@ -728,6 +793,30 @@ fn side_index_items(app: &App) -> Vec<String> {
                     .collect()
             }
         }
+        SidePanel::Notes => {
+            if app.chapter_notes.is_empty() {
+                vec!["No notes for this chapter. Press a to create one.".to_string()]
+            } else {
+                app.chapter_notes
+                    .iter()
+                    .map(|note| {
+                        let preview = note
+                            .body
+                            .lines()
+                            .next()
+                            .unwrap_or("(empty)")
+                            .chars()
+                            .take(40)
+                            .collect::<String>();
+                        let refs = note.verses.len();
+                        format!(
+                            "{preview}  ({refs} ref{})",
+                            if refs == 1 { "" } else { "s" }
+                        )
+                    })
+                    .collect()
+            }
+        }
     }
 }
 
@@ -739,6 +828,9 @@ fn side_selected_index(app: &App) -> Option<usize> {
         SidePanel::Search => app
             .selected_search_hit()
             .map(|_| app.selected_search_result.selected().unwrap_or(0)),
+        SidePanel::Notes => app
+            .selected_note()
+            .map(|_| app.selected_note.selected().unwrap_or(0)),
     }
 }
 
@@ -828,6 +920,9 @@ fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
                 (Focus::Side, SidePanel::CrossReferences) => {
                     "Side pane refs: top index, bottom full verse preview. j/k moves the index."
                 }
+                (Focus::Side, SidePanel::Notes) => {
+                    "Notes: j/k moves, enter opens in $EDITOR, a creates new note."
+                }
             },
             theme.fg(theme.muted),
         )));
@@ -838,4 +933,36 @@ fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
         .block(Block::default().padding(Padding::new(1, 1, 0, 0)));
 
     frame.render_widget(footer, area);
+}
+
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let max = width.max(10);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+
+    for word in text.split_whitespace() {
+        let word_width = word.chars().count();
+        let spacer = usize::from(!current.is_empty());
+        if current_width + spacer + word_width > max && !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        if !current.is_empty() {
+            current.push(' ');
+            current_width += 1;
+        }
+        current.push_str(word);
+        current_width += word_width;
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
