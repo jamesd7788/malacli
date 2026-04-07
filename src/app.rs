@@ -37,6 +37,12 @@ pub enum InputMode {
     Jump,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HistoryMode {
+    Push,
+    Replace,
+}
+
 pub struct App {
     pub is_running: bool,
     pub translations: Vec<TranslationEntry>,
@@ -409,7 +415,11 @@ impl App {
                 self.mode = InputMode::Normal;
                 self.input.clear();
                 if let Some(target) = parse_reference(&input) {
-                    self.open_verse(target, format!("Jumped to {}.", target.display()), true);
+                    self.open_verse(
+                        target,
+                        format!("Jumped to {}.", target.display()),
+                        HistoryMode::Push,
+                    );
                 } else {
                     self.status = format!("Could not resolve \"{input}\".");
                 }
@@ -450,6 +460,7 @@ impl App {
             (index + delta as usize).min(chapter.len().saturating_sub(1))
         };
         self.current_verse = chapter[next].id;
+        self.replace_history_current(self.current_verse);
         self.refresh_cross_references();
     }
 
@@ -463,7 +474,7 @@ impl App {
                             self.open_verse(
                                 hit.verse,
                                 format!("Opened search hit {}.", hit.verse.display()),
-                                true,
+                                HistoryMode::Push,
                             );
                         }
                     }
@@ -478,7 +489,7 @@ impl App {
                             self.open_verse(
                                 reference,
                                 format!("Opened cross reference {}.", reference.display()),
-                                true,
+                                HistoryMode::Push,
                             );
                         }
                     }
@@ -487,9 +498,10 @@ impl App {
         }
     }
 
-    fn open_verse(&mut self, verse: VerseId, status: String, push_history: bool) {
-        if push_history {
-            self.push_history(verse);
+    fn open_verse(&mut self, verse: VerseId, status: String, history_mode: HistoryMode) {
+        match history_mode {
+            HistoryMode::Push => self.push_history(verse),
+            HistoryMode::Replace => self.replace_history_current(verse),
         }
         self.current_verse = verse;
         self.ensure_active_verse_loaded();
@@ -512,6 +524,16 @@ impl App {
             self.history.pop_front();
         }
         self.history_index = self.history.len().saturating_sub(1);
+    }
+
+    fn replace_history_current(&mut self, verse: VerseId) {
+        if self.history.is_empty() {
+            self.history.push_back(verse);
+            self.history_index = 0;
+            return;
+        }
+
+        self.history[self.history_index] = verse;
     }
 
     fn go_back(&mut self) {
@@ -621,16 +643,42 @@ impl App {
     }
 
     fn next_chapter(&mut self) {
+        if self.bible().next_chapter(self.current_verse).is_none()
+            && !self.translations[self.active_translation].is_ready()
+        {
+            let _ = self.translations[self.active_translation].ensure_full_loaded();
+        }
+
         if let Some(next) = self.bible().next_chapter(self.current_verse) {
-            self.open_verse(next, format!("Moved to {}.", next.display()), true);
+            let history_mode = if next.book == self.current_verse.book {
+                HistoryMode::Replace
+            } else {
+                HistoryMode::Push
+            };
+            self.open_verse(next, format!("Moved to {}.", next.display()), history_mode);
         } else if !self.translations[self.active_translation].is_ready() {
             self.status = format!("{} is still loading.", self.current_translation());
         }
     }
 
     fn previous_chapter(&mut self) {
+        if self.bible().previous_chapter(self.current_verse).is_none()
+            && !self.translations[self.active_translation].is_ready()
+        {
+            let _ = self.translations[self.active_translation].ensure_full_loaded();
+        }
+
         if let Some(previous) = self.bible().previous_chapter(self.current_verse) {
-            self.open_verse(previous, format!("Moved to {}.", previous.display()), true);
+            let history_mode = if previous.book == self.current_verse.book {
+                HistoryMode::Replace
+            } else {
+                HistoryMode::Push
+            };
+            self.open_verse(
+                previous,
+                format!("Moved to {}.", previous.display()),
+                history_mode,
+            );
         } else if !self.translations[self.active_translation].is_ready() {
             self.status = format!("{} is still loading.", self.current_translation());
         }
@@ -839,12 +887,66 @@ mod tests {
     #[test]
     fn u_and_p_move_through_history() {
         let mut app = App::load().unwrap();
-        let start = app.current_verse;
+        app.handle_key_event(key(KeyCode::Char('g')));
+        for ch in "john 1:1".chars() {
+            app.handle_key_event(key(KeyCode::Char(ch)));
+        }
+        app.handle_key_event(key(KeyCode::Enter));
+        app.handle_key_event(key(KeyCode::Char('g')));
+        for ch in "rom 1:1".chars() {
+            app.handle_key_event(key(KeyCode::Char(ch)));
+        }
+        app.handle_key_event(key(KeyCode::Enter));
         app.handle_key_event(key(KeyCode::Char('l')));
         let second = app.current_verse;
         app.handle_key_event(key(KeyCode::Char('u')));
-        assert_eq!(app.current_verse, start);
+        assert_eq!(app.current_verse.display(), "John 1:1");
         app.handle_key_event(key(KeyCode::Char('p')));
         assert_eq!(app.current_verse, second);
+    }
+
+    #[test]
+    fn reader_movement_replaces_current_history_item() {
+        let mut app = App::load().unwrap();
+        app.handle_key_event(key(KeyCode::Char('g')));
+        for ch in "john 3:16".chars() {
+            app.handle_key_event(key(KeyCode::Char(ch)));
+        }
+        app.handle_key_event(key(KeyCode::Enter));
+        let history_len = app.history.len();
+        app.handle_key_event(key(KeyCode::Char('j')));
+        assert_eq!(app.history.len(), history_len);
+        assert_eq!(app.history[app.history_index], app.current_verse);
+    }
+
+    #[test]
+    fn same_book_chapter_movement_replaces_current_history_item() {
+        let mut app = App::load().unwrap();
+        app.handle_key_event(key(KeyCode::Char('g')));
+        for ch in "col 3:1".chars() {
+            app.handle_key_event(key(KeyCode::Char(ch)));
+        }
+        app.handle_key_event(key(KeyCode::Enter));
+        let history_len = app.history.len();
+        app.handle_key_event(key(KeyCode::Char('l')));
+        assert_eq!(app.current_verse.display(), "Colossians 4:1");
+        assert_eq!(app.history.len(), history_len);
+        assert_eq!(app.history[app.history_index], app.current_verse);
+    }
+
+    #[test]
+    fn cross_book_chapter_movement_pushes_history_item() {
+        let mut app = App::load().unwrap();
+        app.handle_key_event(key(KeyCode::Char('g')));
+        for ch in "col 4:1".chars() {
+            app.handle_key_event(key(KeyCode::Char(ch)));
+        }
+        app.handle_key_event(key(KeyCode::Enter));
+        let history_len = app.history.len();
+        app.handle_key_event(key(KeyCode::Char('l')));
+        assert_eq!(app.current_verse.display(), "1 Thessalonians 1:1");
+        assert_eq!(app.history.len(), history_len + 1);
+        app.handle_key_event(key(KeyCode::Char('u')));
+        assert_eq!(app.current_verse.display(), "Colossians 4:1");
     }
 }

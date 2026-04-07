@@ -62,6 +62,24 @@ impl TranslationEntry {
         Ok(true)
     }
 
+    pub fn ensure_full_loaded(&mut self) -> Result<bool> {
+        if self.bible.as_ref().is_some_and(Bible::is_complete) {
+            return Ok(true);
+        }
+        if self.failed {
+            return Ok(false);
+        }
+
+        let bible = Bible::load(&self.source_path, Path::new(CROSS_REFS_PATH))?;
+        if bible.first_verse().is_none() {
+            self.failed = true;
+            return Ok(false);
+        }
+
+        self.bible = Some(bible);
+        Ok(true)
+    }
+
     pub fn set_loaded_bible(&mut self, bible: Bible) {
         self.bible = Some(bible);
         self.failed = false;
