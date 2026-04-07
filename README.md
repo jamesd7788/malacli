@@ -1,6 +1,6 @@
-# tui-bible
+# malacli
 
-A fast, keyboard-first terminal Bible reader in Rust with `ratatui`, real Bible text, full-text search, cross references, local translation loading, and session restore.
+A fast, keyboard-first terminal Bible reader in Rust with `ratatui`, real Bible text, full-text search, cross references, notes with obsidian integration, local translation loading, and session restore.
 
 The current product direction is reader-first with study power: beautiful reading, fast passage movement, a contextual side pane, and no network dependency in the core app.
 
@@ -14,6 +14,8 @@ The current product direction is reader-first with study power: beautiful readin
 - Full-text search in the side pane
 - Cross-reference side pane backed by the OpenBible cross-reference dataset
 - Contextual preview pane for search and cross-reference results
+- Notes with `$EDITOR` integration, obsidian wikilinks, and verse pinning
+- Visual verse selection with Shift+j/k for multi-verse notes
 - Back/forward history with short reference tabs in the header
 - Session restore for current passage, pane state, translation, and history
 - Lazy local translation loading with bundled KJV fallback
@@ -24,27 +26,27 @@ The current product direction is reader-first with study power: beautiful readin
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew tap jamesd7788/tui-bible
-brew install tui-bible
+brew tap jamesd7788/tap
+brew install malacli
 ```
 
 ### AUR (Arch Linux)
 
 ```bash
-yay -S tui-bible
+yay -S malacli
 ```
 
 ### Cargo
 
 ```bash
-cargo install --git https://github.com/jamesd7788/tui-bible
+cargo install --git https://github.com/jamesd7788/malacli
 ```
 
 ### From source
 
 ```bash
 cargo build --release
-./target/release/tui-bible
+./target/release/malacli
 ```
 
 ## Controls
@@ -52,15 +54,49 @@ cargo build --release
 - `q`: quit
 - `g`: jump to a passage
 - `/`: search scripture
-- `x`: switch side pane back to cross references
+- `x`: switch side pane to cross references
+- `n`: switch side pane to notes
+- `a`: create note at current verse (or add to pinned note)
+- `P`: pin/unpin a note
 - `tab`: toggle reader/side pane focus
 - `j` / `k`: move current verse in reader, or selected item in side pane
+- `J` / `K`: extend verse selection (shift+j/k)
 - `h` / `l`: previous/next chapter
-- `enter`: open selected search hit or cross reference
+- `enter`: open selected item (search hit, cross ref, or note in $EDITOR)
 - `u`: back in history
 - `p`: forward in history
 - `t`: cycle loaded translations
-- `esc`: cancel search/jump entry
+- `esc`: cancel input / clear selection
+
+## Notes
+
+Notes are markdown files stored in `~/.config/malacli/notes/` with verse metadata. They integrate with obsidian via wikilinks and a `verses/` subfolder of individual verse pages.
+
+Workflow:
+1. Press `a` on a verse to create a note and open in `$EDITOR`
+2. Use `Shift+j/k` to select multiple verses before pressing `a`
+3. Press `n` to view notes for the current chapter
+4. Press `P` on a note to pin it, then navigate and press `a` to add verses from anywhere
+5. Press `P` again to unpin
+
+Notes format:
+
+```markdown
+> For God so loved the world...
+>
+> — [[john3-16]]
+
+your notes here
+
+---
+verses: [John.3.16]
+```
+
+Symlink into your obsidian vault:
+
+```bash
+ln -s ~/.config/malacli/notes ~/your-vault/bible-notes
+```
 
 ## History Behavior
 
@@ -85,7 +121,7 @@ Default theme is the built-in warm/monastic palette.
 Use your terminal foreground/background colors instead:
 
 ```bash
-TUI_BIBLE_THEME=terminal cargo run
+MALACLI_THEME=terminal malacli
 ```
 
 ## Session Restore
@@ -95,25 +131,25 @@ The app saves session state on normal quit and restores it on startup.
 Default session path:
 
 ```text
-$XDG_CONFIG_HOME/tui-bible/session.toml
+$XDG_CONFIG_HOME/malacli/session.toml
 ```
 
 Fallback:
 
 ```text
-$HOME/.config/tui-bible/session.toml
+$HOME/.config/malacli/session.toml
 ```
 
 Override the session path:
 
 ```bash
-TUI_BIBLE_SESSION=/path/to/session.toml cargo run
+MALACLI_SESSION=/path/to/session.toml malacli
 ```
 
 Clear session state:
 
 ```bash
-rm "$HOME/.config/tui-bible/session.toml"
+rm "$HOME/.config/malacli/session.toml"
 ```
 
 If another app instance is still running, it can recreate the file on exit.
@@ -146,27 +182,27 @@ Supported local formats:
 Set a translations directory (persists across sessions):
 
 ```bash
-tui-bible set-bible-dir ~/bibles
+malacli set-bible-dir ~/bibles
 ```
 
 Clear it:
 
 ```bash
-tui-bible unset-bible-dir
+malacli unset-bible-dir
 ```
 
 Or use an environment variable (takes precedence over config):
 
 ```bash
-export TUI_BIBLE_OSIS_DIR=$HOME/src/osis-bibles
-tui-bible
+export MALACLI_OSIS_DIR=$HOME/src/osis-bibles
+malacli
 ```
 
 Prefer a translation on startup:
 
 ```bash
-export TUI_BIBLE_TRANSLATION=esv
-tui-bible
+export MALACLI_TRANSLATION=esv
+malacli
 ```
 
 Notes:

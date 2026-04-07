@@ -1,10 +1,10 @@
 # Maintainer: James <james@example.com>
-pkgname=tui-bible
+pkgname=malacli
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='A fast, keyboard-first terminal Bible reader'
 arch=('x86_64' 'aarch64')
-url='https://github.com/jamesd7788/tui-bible'
+url='https://github.com/jamesd7788/malacli'
 license=('MIT')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")

@@ -39,11 +39,11 @@ jobs:
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../tui-bible-${{ matrix.target }}.tar.gz tui-bible
+          tar czf ../../../malacli-${{ matrix.target }}.tar.gz malacli
       - uses: actions/upload-artifact@v4
         with:
-          name: tui-bible-${{ matrix.target }}
-          path: tui-bible-${{ matrix.target }}.tar.gz
+          name: malacli-${{ matrix.target }}
+          path: malacli-${{ matrix.target }}.tar.gz
 
   release:
     needs: build
@@ -56,4 +56,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: tui-bible-*.tar.gz
+          files: malacli-*.tar.gz

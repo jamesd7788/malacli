@@ -39,7 +39,7 @@ struct Theme {
 
 impl Theme {
     fn current() -> Self {
-        match std::env::var("TUI_BIBLE_THEME") {
+        match std::env::var("MALACLI_THEME") {
             Ok(value) if value.eq_ignore_ascii_case("terminal") => Self::terminal(),
             _ => Self::monastic(),
         }

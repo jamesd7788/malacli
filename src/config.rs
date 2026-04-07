@@ -33,15 +33,15 @@ pub fn save(config: &Config) -> io::Result<()> {
 
 fn config_path() -> PathBuf {
     if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Path::new(&config_home).join("tui-bible").join(CONFIG_FILE);
+        return Path::new(&config_home).join("malacli").join(CONFIG_FILE);
     }
 
     if let Some(home) = std::env::var_os("HOME") {
         return Path::new(&home)
             .join(".config")
-            .join("tui-bible")
+            .join("malacli")
             .join(CONFIG_FILE);
     }
 
-    PathBuf::from(".tui-bible-config.toml")
+    PathBuf::from(".malacli-config.toml")
 }

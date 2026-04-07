@@ -440,13 +440,13 @@ fn parse_osis_ref(input: &str) -> Option<VerseId> {
 
 pub fn notes_dir() -> PathBuf {
     if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Path::new(&config_home).join("tui-bible").join("notes");
+        return Path::new(&config_home).join("malacli").join("notes");
     }
     if let Some(home) = std::env::var_os("HOME") {
         return Path::new(&home)
             .join(".config")
-            .join("tui-bible")
+            .join("malacli")
             .join("notes");
     }
-    PathBuf::from(".tui-bible-notes")
+    PathBuf::from(".malacli-notes")
 }

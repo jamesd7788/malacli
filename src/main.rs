@@ -31,12 +31,12 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             "-V" | "--version" => {
-                println!("tui-bible {VERSION}");
+                println!("malacli {VERSION}");
                 return Ok(());
             }
             "set-bible-dir" => {
                 let path = args.get(1).unwrap_or_else(|| {
-                    eprintln!("usage: tui-bible set-bible-dir <path>");
+                    eprintln!("usage: malacli set-bible-dir <path>");
                     process::exit(1);
                 });
                 return set_bible_dir(path);
@@ -46,7 +46,7 @@ fn main() -> Result<()> {
             }
             other => {
                 eprintln!("unknown command: {other}");
-                eprintln!("run `tui-bible --help` for usage");
+                eprintln!("run `malacli --help` for usage");
                 process::exit(1);
             }
         }
@@ -132,15 +132,18 @@ fn unset_bible_dir() -> Result<()> {
 
 fn print_help() {
     println!(
-        "\
-tui-bible {VERSION} — a terminal Bible reader
+        "
+  ┌┬┐┌─┐┬  ┌─┐┌─┐┬  ┬
+  │││├─┤│  ├─┤│  │  │
+  ┴ ┴┴ ┴┴─┘┴ ┴└─┘┴─┘┴
+  {VERSION}
 
 USAGE
-  tui-bible                  launch the reader
-  tui-bible set-bible-dir <path>   set local translations directory
-  tui-bible unset-bible-dir        clear the translations directory
-  tui-bible -h, --help             show this help
-  tui-bible -V, --version          show version
+  malacli                       launch the reader
+  malacli set-bible-dir <path>  set local translations directory
+  malacli unset-bible-dir       clear the translations directory
+  malacli -h, --help            show this help
+  malacli -V, --version         show version
 
 READER CONTROLS
   q        quit
@@ -149,22 +152,25 @@ READER CONTROLS
   x        show cross references
   n        show notes for current chapter
   a        create a new note at current verse
+  P        pin/unpin a note (a adds verses to pinned note)
   tab      toggle reader / side pane focus
   j / k    move verse (reader) or selection (side pane)
+  J / K    extend verse selection (shift+j/k)
   h / l    previous / next chapter
   enter    open selected item (search hit, cross ref, or note in $EDITOR)
   u / p    back / forward in history
   t        cycle loaded translations
-  esc      cancel input
+  esc      cancel input / clear selection
 
 ENVIRONMENT
-  TUI_BIBLE_OSIS_DIR        override translations directory (takes precedence over config)
-  TUI_BIBLE_TRANSLATION     preferred translation code on startup (e.g. esv)
-  TUI_BIBLE_THEME           set to 'terminal' for terminal color passthrough
-  TUI_BIBLE_SESSION          override session file path
+  MALACLI_OSIS_DIR        override translations directory (takes precedence over config)
+  MALACLI_TRANSLATION     preferred translation code on startup (e.g. esv)
+  MALACLI_THEME           set to 'terminal' for terminal color passthrough
+  MALACLI_SESSION         override session file path
 
 CONFIG
-  ~/.config/tui-bible/config.toml    persistent settings (bible_dir)
-  ~/.config/tui-bible/session.toml   session state (auto-saved on quit)"
+  ~/.config/malacli/config.toml    persistent settings (bible_dir)
+  ~/.config/malacli/session.toml   session state (auto-saved on quit)
+  ~/.config/malacli/notes/         notes directory"
     );
 }

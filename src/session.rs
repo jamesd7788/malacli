@@ -58,22 +58,22 @@ pub fn state_from_parts(
 }
 
 fn session_path() -> PathBuf {
-    std::env::var("TUI_BIBLE_SESSION")
+    std::env::var("MALACLI_SESSION")
         .map(PathBuf::from)
         .unwrap_or_else(|_| default_session_path())
 }
 
 fn default_session_path() -> PathBuf {
     if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Path::new(&config_home).join("tui-bible").join(SESSION_FILE);
+        return Path::new(&config_home).join("malacli").join(SESSION_FILE);
     }
 
     if let Some(home) = std::env::var_os("HOME") {
         return Path::new(&home)
             .join(".config")
-            .join("tui-bible")
+            .join("malacli")
             .join(SESSION_FILE);
     }
 
-    PathBuf::from(".tui-bible-session.toml")
+    PathBuf::from(".malacli-session.toml")
 }

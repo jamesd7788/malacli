@@ -10,8 +10,8 @@ use crate::bible::Bible;
 use crate::config;
 use crate::data;
 
-const OSIS_DIR_ENV: &str = "TUI_BIBLE_OSIS_DIR";
-const DEFAULT_TRANSLATION_ENV: &str = "TUI_BIBLE_TRANSLATION";
+const OSIS_DIR_ENV: &str = "MALACLI_OSIS_DIR";
+const DEFAULT_TRANSLATION_ENV: &str = "MALACLI_TRANSLATION";
 const FALLBACK_LOCAL_TRANSLATIONS_DIR: &str = "/Users/james/Downloads/media-tool-kit-xml-bibles";
 
 pub struct TranslationEntry {
