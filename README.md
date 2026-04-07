@@ -16,6 +16,15 @@ A fast terminal Bible reader in Rust with `ratatui`, real Bible text, and real c
 cargo run
 ```
 
+Use your terminal's foreground/background colors instead of the built-in warm theme:
+
+```bash
+TUI_BIBLE_THEME=terminal cargo run
+```
+
+The app restores your last session on startup, including current passage and back/forward history.
+Override the session file path with `TUI_BIBLE_SESSION=/path/to/session.toml` if needed.
+
 ## Controls
 
 - `q`: quit

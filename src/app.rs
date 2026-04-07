@@ -5,10 +5,12 @@ use std::thread;
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
+use serde::{Deserialize, Serialize};
 
 use crate::bible::{
-    Bible, CrossReference, SearchHit, Verse, VerseId, parse_reference, suggest_books,
+    Bible, CrossReference, SearchHit, Verse, VerseId, book_abbrev, parse_reference, suggest_books,
 };
+use crate::session;
 use crate::translation::{TranslationEntry, TranslationRegistry};
 
 const SEARCH_LIMIT: usize = 50;
@@ -16,13 +18,13 @@ const REF_LIMIT: usize = 24;
 const READER_SCROLL_MARGIN: usize = 5;
 const HISTORY_LIMIT: usize = 100;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Focus {
     Reader,
     Side,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum SidePanel {
     CrossReferences,
     Search,
@@ -55,6 +57,11 @@ pub struct App {
     load_generation: u64,
 }
 
+pub struct HistoryItem {
+    pub label: String,
+    pub current: bool,
+}
+
 struct TranslationLoadResult {
     index: usize,
     generation: u64,
@@ -64,10 +71,15 @@ struct TranslationLoadResult {
 impl App {
     pub fn load() -> Result<Self> {
         let registry = TranslationRegistry::load()?;
+        let saved_session = session::load();
         let preferred = registry.preferred_code().map(str::to_string);
         let mut translations = registry.into_entries();
-        let mut active_translation = preferred
-            .as_deref()
+        let preferred_translation = preferred.as_deref().or_else(|| {
+            saved_session
+                .as_ref()
+                .map(|state| state.translation.as_str())
+        });
+        let mut active_translation = preferred_translation
             .and_then(|code| translations.iter().position(|entry| entry.code == code))
             .unwrap_or(0);
         let startup_verse = parse_reference("john 1:1").unwrap_or(VerseId {
@@ -75,33 +87,47 @@ impl App {
             chapter: 1,
             verse: 1,
         });
-        if !translations[active_translation].load_window(startup_verse)? {
+        let saved_verse = saved_session
+            .as_ref()
+            .map(|state| state.current_verse)
+            .unwrap_or(startup_verse);
+        if !translations[active_translation].load_window(saved_verse)? {
             active_translation = 0;
         }
-        let _ = translations[active_translation].load_window(startup_verse)?;
+        let _ = translations[active_translation].load_window(saved_verse)?;
         let bible = translations[active_translation]
             .bible()
             .expect("default translation should load");
         let current_verse = bible
-            .parse_reference("john 1:1")
-            .or_else(|| bible.first_verse())
-            .expect("bible should have at least one verse");
+            .verse(saved_verse)
+            .map(|verse| verse.id)
+            .unwrap_or_else(|| {
+                bible
+                    .parse_reference("john 1:1")
+                    .or_else(|| bible.first_verse())
+                    .expect("bible should have at least one verse")
+            });
         let cross_references = bible.cross_references(current_verse, REF_LIMIT);
         let mut selected_cross_reference = ListState::default();
         if !cross_references.is_empty() {
             selected_cross_reference.select(Some(0));
         }
 
-        let mut history = VecDeque::new();
-        history.push_back(current_verse);
+        let (history, history_index) = restore_history(saved_session.as_ref(), current_verse);
 
         let mut app = Self {
             is_running: true,
             translations,
             active_translation,
             current_verse,
-            focus: Focus::Reader,
-            side_panel: SidePanel::CrossReferences,
+            focus: saved_session
+                .as_ref()
+                .map(|state| state.focus)
+                .unwrap_or(Focus::Reader),
+            side_panel: saved_session
+                .as_ref()
+                .map(|state| state.side_panel)
+                .unwrap_or(SidePanel::CrossReferences),
             mode: InputMode::Normal,
             input: String::new(),
             status: "Ready. g jump, / search, tab changes pane, enter opens selected item."
@@ -111,7 +137,7 @@ impl App {
             selected_search_result: ListState::default(),
             selected_cross_reference,
             history,
-            history_index: 0,
+            history_index,
             load_rx: None,
             load_generation: 0,
         };
@@ -172,22 +198,30 @@ impl App {
         }
     }
 
-    pub fn history_summary(&self) -> String {
+    pub fn history_items(&self) -> Vec<HistoryItem> {
         let start = self.history_index.saturating_sub(3);
         let end = (self.history_index + 4).min(self.history.len());
-        let mut parts = Vec::new();
-
+        let mut items = Vec::new();
         for index in start..end {
             let verse = self.history[index];
-            let label = compact_history_label(verse.display());
-            if index == self.history_index {
-                parts.push(format!("[{label}]"));
-            } else {
-                parts.push(label);
-            }
+            items.push(HistoryItem {
+                label: short_history_label(verse),
+                current: index == self.history_index,
+            });
         }
+        items
+    }
 
-        format!("u back  p forward  {}", parts.join("  "))
+    pub fn save_session(&self) -> std::io::Result<()> {
+        let state = session::state_from_parts(
+            self.translations[self.active_translation].code.clone(),
+            self.current_verse,
+            self.focus,
+            self.side_panel,
+            &self.history,
+            self.history_index,
+        );
+        session::save(&state)
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -663,15 +697,45 @@ impl App {
     }
 }
 
-fn compact_history_label(label: String) -> String {
-    let max = 14;
-    let chars = label.chars().collect::<Vec<_>>();
-    if chars.len() <= max {
-        return label;
+fn short_history_label(verse: VerseId) -> String {
+    format!(
+        "{} {}:{}",
+        book_abbrev(verse.book),
+        verse.chapter,
+        verse.verse
+    )
+}
+
+fn restore_history(
+    saved_session: Option<&session::SessionState>,
+    current_verse: VerseId,
+) -> (VecDeque<VerseId>, usize) {
+    let mut history = saved_session
+        .map(|state| state.history.iter().copied().collect::<VecDeque<_>>())
+        .filter(|history: &VecDeque<VerseId>| !history.is_empty())
+        .unwrap_or_else(|| VecDeque::from([current_verse]));
+
+    if !history.iter().any(|verse| *verse == current_verse) {
+        history.push_back(current_verse);
     }
-    let mut short = chars.into_iter().take(max - 1).collect::<String>();
-    short.push('…');
-    short
+
+    while history.len() > HISTORY_LIMIT {
+        history.pop_front();
+    }
+
+    let mut history_index = saved_session
+        .map(|state| state.history_index)
+        .unwrap_or_else(|| history.len().saturating_sub(1))
+        .min(history.len().saturating_sub(1));
+
+    if history[history_index] != current_verse {
+        history_index = history
+            .iter()
+            .position(|verse| *verse == current_verse)
+            .unwrap_or_else(|| history.len().saturating_sub(1));
+    }
+
+    (history, history_index)
 }
 
 fn jump_book_prefix(input: &str) -> String {

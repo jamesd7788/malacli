@@ -1,6 +1,7 @@
 mod app;
 mod bible;
 mod event;
+mod session;
 mod translation;
 mod tui;
 mod ui;
@@ -31,5 +32,6 @@ fn run(tui: &mut Tui) -> Result<()> {
         }
     }
 
+    let _ = app.save_session();
     Ok(())
 }

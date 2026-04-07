@@ -1,9 +1,9 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Padding, Paragraph},
 };
 
 use crate::{
@@ -23,11 +23,98 @@ const READER_SELECTED_TEXT: Color = Color::Rgb(250, 239, 216);
 const READING_COLUMN_MAX: usize = 84;
 const READER_PARAGRAPH_VERSES: usize = 4;
 
+#[derive(Clone, Copy)]
+struct Theme {
+    transparent: bool,
+    bg: Color,
+    panel: Color,
+    text: Color,
+    muted: Color,
+    accent: Color,
+    select: Color,
+    strong: Color,
+    title_focus: Color,
+    reader_selected_text: Color,
+}
+
+impl Theme {
+    fn current() -> Self {
+        match std::env::var("TUI_BIBLE_THEME") {
+            Ok(value) if value.eq_ignore_ascii_case("terminal") => Self::terminal(),
+            _ => Self::monastic(),
+        }
+    }
+
+    fn monastic() -> Self {
+        Self {
+            transparent: false,
+            bg: BG,
+            panel: PANEL,
+            text: TEXT,
+            muted: MUTED,
+            accent: ACCENT,
+            select: SELECT,
+            strong: STRONG,
+            title_focus: TITLE_FOCUS,
+            reader_selected_text: READER_SELECTED_TEXT,
+        }
+    }
+
+    fn terminal() -> Self {
+        Self {
+            transparent: true,
+            bg: Color::Reset,
+            panel: Color::Reset,
+            text: Color::Reset,
+            muted: Color::DarkGray,
+            accent: Color::Yellow,
+            select: Color::DarkGray,
+            strong: Color::Yellow,
+            title_focus: Color::Yellow,
+            reader_selected_text: Color::Reset,
+        }
+    }
+
+    fn bg_style(self) -> Style {
+        if self.transparent {
+            Style::default()
+        } else {
+            Style::default().bg(self.bg)
+        }
+    }
+
+    fn surface_style(self, color: Color) -> Style {
+        if self.transparent {
+            Style::default()
+        } else {
+            Style::default().bg(color)
+        }
+    }
+
+    fn fg(self, color: Color) -> Style {
+        if self.transparent && color == Color::Reset {
+            Style::default()
+        } else {
+            Style::default().fg(color)
+        }
+    }
+
+    fn selected(self) -> Style {
+        if self.transparent {
+            Style::default().reversed().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .bg(self.select)
+                .fg(self.text)
+                .add_modifier(Modifier::BOLD)
+        }
+    }
+}
+
 pub fn render(frame: &mut Frame<'_>, app: &App) {
-    frame.render_widget(
-        Block::default().style(Style::default().bg(BG)),
-        frame.area(),
-    );
+    let theme = Theme::current();
+
+    frame.render_widget(Block::default().style(theme.bg_style()), frame.area());
 
     let [header, body, footer] = Layout::default()
         .direction(Direction::Vertical)
@@ -38,12 +125,12 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         ])
         .areas(frame.area());
 
-    render_header(frame, app, header);
-    render_body(frame, app, body);
-    render_footer(frame, app, footer);
+    render_header(frame, app, header, theme);
+    render_body(frame, app, body, theme);
+    render_footer(frame, app, footer, theme);
 }
 
-fn render_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_header(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let current = app.current_verse;
     let chapter_label = format!(
         "{} {} [{}]",
@@ -65,24 +152,24 @@ fn render_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
             "TUI BIBLE",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            theme.fg(theme.accent).add_modifier(Modifier::BOLD),
         ),
         Span::raw("   "),
         Span::styled(
             chapter_label,
-            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            theme.fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::raw("   "),
-        Span::styled(mode_label, Style::default().fg(MUTED)),
+        Span::styled(mode_label, theme.fg(theme.muted)),
         Span::raw("   "),
-        Span::styled(app.side_panel_count_label(), Style::default().fg(MUTED)),
+        Span::styled(app.side_panel_count_label(), theme.fg(theme.muted)),
     ]))
     .block(
         Block::default()
             .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(MUTED))
+            .border_style(theme.fg(theme.muted))
             .padding(Padding::new(1, 1, 0, 0))
-            .style(Style::default().bg(BG)),
+            .style(theme.bg_style()),
     );
 
     let side_label = match app.side_panel {
@@ -90,73 +177,104 @@ fn render_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
         SidePanel::Search => " Side: Search ",
     };
 
-    let tabs_line = Line::from(vec![
-        pane_tab(" Reader ", app.focus == Focus::Reader),
+    let mut tabs_spans = vec![
+        pane_tab(" Reader ", app.focus == Focus::Reader, theme),
         Span::raw(" "),
-        pane_tab(side_label, app.focus == Focus::Side),
+        pane_tab(side_label, app.focus == Focus::Side, theme),
         Span::raw("   "),
         Span::styled(
             "u back",
-            Style::default().fg(if app.can_go_back() { TEXT } else { MUTED }),
+            theme.fg(if app.can_go_back() {
+                theme.text
+            } else {
+                theme.muted
+            }),
         ),
         Span::raw("  "),
         Span::styled(
             "p fwd",
-            Style::default().fg(if app.can_go_forward() { TEXT } else { MUTED }),
+            theme.fg(if app.can_go_forward() {
+                theme.text
+            } else {
+                theme.muted
+            }),
         ),
         Span::raw("  "),
-        Span::styled("j/k move", Style::default().fg(MUTED)),
-    ]);
+        Span::styled("j/k move", theme.fg(theme.muted)),
+        Span::raw("   "),
+        Span::styled("History ", theme.fg(theme.accent)),
+    ];
+    tabs_spans.extend(history_spans(app, theme));
+    let tabs_line = Line::from(tabs_spans);
     let tabs_widget = Paragraph::new(tabs_line).block(
         Block::default()
             .padding(Padding::new(1, 1, 0, 0))
-            .style(Style::default().bg(BG)),
+            .style(theme.bg_style()),
     );
 
     frame.render_widget(title, top);
     frame.render_widget(tabs_widget, tabs);
 }
 
-fn pane_tab(label: &'static str, active: bool) -> Span<'static> {
+fn history_spans(app: &App, theme: Theme) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let items = app.history_items();
+    if items.is_empty() {
+        return spans;
+    }
+
+    for (index, item) in items.into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw(" "));
+        }
+
+        let style = if item.current {
+            theme.selected()
+        } else {
+            theme.fg(theme.muted)
+        };
+        spans.push(Span::styled(format!(" {} ", item.label), style));
+    }
+
+    spans
+}
+
+fn pane_tab(label: &'static str, active: bool, theme: Theme) -> Span<'static> {
     if active {
         Span::styled(
             label,
-            Style::default()
-                .fg(TITLE_FOCUS)
-                .add_modifier(Modifier::BOLD),
+            theme.fg(theme.title_focus).add_modifier(Modifier::BOLD),
         )
     } else {
-        Span::styled(label, Style::default().fg(MUTED))
+        Span::styled(label, theme.fg(theme.muted))
     }
 }
 
-fn render_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_body(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let [reader, side] = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .areas(area);
 
-    render_reader(frame, app, reader);
-    render_side_panel(frame, app, side);
+    render_reader(frame, app, reader, theme);
+    render_side_panel(frame, app, side, theme);
 }
 
-fn render_reader(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_reader(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let border = if app.focus == Focus::Reader {
-        STRONG
+        theme.strong
     } else {
-        MUTED
+        theme.muted
     };
     let title_style = if app.focus == Focus::Reader {
-        Style::default()
-            .fg(TITLE_FOCUS)
-            .add_modifier(Modifier::BOLD)
+        theme.fg(theme.title_focus).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(ACCENT)
+        theme.fg(theme.accent)
     };
     let available_width = area.width.saturating_sub(8).max(12) as usize;
     let content_width = available_width.min(READING_COLUMN_MAX);
     let left_pad = available_width.saturating_sub(content_width) / 2;
-    let reader_view = build_reader_view(app, content_width, left_pad);
+    let reader_view = build_reader_view(app, content_width, left_pad, theme);
     let viewport_height = area.height.saturating_sub(4) as usize;
     let scroll = app.effective_reader_scroll(
         viewport_height,
@@ -170,9 +288,9 @@ fn render_reader(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 title_style,
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border))
+            .border_style(theme.fg(border))
             .padding(Padding::new(1, 2, 1, 0))
-            .style(Style::default().bg(BG)),
+            .style(theme.bg_style()),
     );
 
     frame.render_widget(paragraph, area);
@@ -190,47 +308,57 @@ struct StyledWord {
     verse_selected: bool,
 }
 
-fn build_reader_view(app: &App, width: usize, left_pad: usize) -> ReaderView {
+fn build_reader_view(app: &App, width: usize, left_pad: usize, theme: Theme) -> ReaderView {
+    build_chapter_context_view(
+        app.current_chapter(),
+        app.current_verse,
+        app.current_translation(),
+        &[],
+        width,
+        left_pad,
+        theme,
+    )
+}
+
+fn build_chapter_context_view(
+    chapter: &[Verse],
+    current: crate::bible::VerseId,
+    translation: String,
+    search_terms: &[String],
+    width: usize,
+    left_pad: usize,
+    theme: Theme,
+) -> ReaderView {
     let mut lines = Vec::new();
     let mut selected_line_top = 0usize;
     let title = format!(
         "{} {}",
-        book_name(app.current_verse.book).to_ascii_uppercase(),
-        app.current_verse.chapter
+        book_name(current.book).to_ascii_uppercase(),
+        current.chapter
     );
-    let subtitle = format!(
-        "{} verses · {}",
-        app.current_chapter().len(),
-        app.current_translation()
-    );
+    let subtitle = format!("{} verses · {}", chapter.len(), translation);
 
     lines.push(centered_line(
         &title,
         width,
         left_pad,
-        Style::default()
-            .fg(TITLE_FOCUS)
-            .add_modifier(Modifier::BOLD),
+        theme.fg(theme.title_focus).add_modifier(Modifier::BOLD),
     ));
     lines.push(centered_line(
         &subtitle,
         width,
         left_pad,
-        Style::default().fg(MUTED),
+        theme.fg(theme.muted),
     ));
     lines.push(Line::raw(""));
 
-    for (paragraph_index, paragraph) in app
-        .current_chapter()
-        .chunks(READER_PARAGRAPH_VERSES)
-        .enumerate()
-    {
+    for (paragraph_index, paragraph) in chapter.chunks(READER_PARAGRAPH_VERSES).enumerate() {
         if paragraph_index > 0 {
             lines.push(Line::raw(""));
         }
 
-        let words = paragraph_words(paragraph, app.current_verse);
-        let wrapped = wrap_styled_words(&words, width, left_pad);
+        let words = paragraph_words(paragraph, current, search_terms, theme);
+        let wrapped = wrap_styled_words(&words, width, left_pad, theme);
         for line in wrapped {
             if line.contains_selected && selected_line_top == 0 {
                 selected_line_top = lines.len();
@@ -245,24 +373,27 @@ fn build_reader_view(app: &App, width: usize, left_pad: usize) -> ReaderView {
     }
 }
 
-fn paragraph_words(verses: &[Verse], current: crate::bible::VerseId) -> Vec<StyledWord> {
+fn paragraph_words(
+    verses: &[Verse],
+    current: crate::bible::VerseId,
+    search_terms: &[String],
+    theme: Theme,
+) -> Vec<StyledWord> {
     let mut words = Vec::new();
 
     for verse in verses {
         let selected = verse.id == current;
         let number_style = if selected {
-            Style::default()
-                .fg(TITLE_FOCUS)
-                .add_modifier(Modifier::BOLD)
+            theme.fg(theme.title_focus).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(MUTED)
+            theme.fg(theme.muted)
         };
         let text_style = if selected {
-            Style::default()
-                .fg(READER_SELECTED_TEXT)
+            theme
+                .fg(theme.reader_selected_text)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(TEXT)
+            theme.fg(theme.text)
         };
 
         words.push(StyledWord {
@@ -272,9 +403,15 @@ fn paragraph_words(verses: &[Verse], current: crate::bible::VerseId) -> Vec<Styl
         });
 
         for word in verse.text.split_whitespace() {
+            let search_match = word_matches_search(word, search_terms);
+            let style = if search_match {
+                theme.fg(theme.strong).add_modifier(Modifier::BOLD)
+            } else {
+                text_style
+            };
             words.push(StyledWord {
                 text: word.to_string(),
-                style: text_style,
+                style,
                 verse_selected: selected,
             });
         }
@@ -283,12 +420,35 @@ fn paragraph_words(verses: &[Verse], current: crate::bible::VerseId) -> Vec<Styl
     words
 }
 
+fn word_matches_search(word: &str, search_terms: &[String]) -> bool {
+    if search_terms.is_empty() {
+        return false;
+    }
+
+    let normalized = normalize_search_word(word);
+    search_terms
+        .iter()
+        .any(|term| !term.is_empty() && normalized.contains(term))
+}
+
+fn normalize_search_word(word: &str) -> String {
+    word.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
 struct WrappedLine {
     line: Line<'static>,
     contains_selected: bool,
 }
 
-fn wrap_styled_words(words: &[StyledWord], width: usize, left_pad: usize) -> Vec<WrappedLine> {
+fn wrap_styled_words(
+    words: &[StyledWord],
+    width: usize,
+    left_pad: usize,
+    theme: Theme,
+) -> Vec<WrappedLine> {
     let mut lines = Vec::new();
     let mut current = Vec::new();
     let mut current_width = 0usize;
@@ -303,6 +463,7 @@ fn wrap_styled_words(words: &[StyledWord], width: usize, left_pad: usize) -> Vec
                 std::mem::take(&mut current),
                 contains_selected,
                 left_pad,
+                theme,
             ));
             current_width = 0;
             contains_selected = false;
@@ -318,7 +479,7 @@ fn wrap_styled_words(words: &[StyledWord], width: usize, left_pad: usize) -> Vec
     }
 
     if !current.is_empty() {
-        lines.push(styled_line(current, contains_selected, left_pad));
+        lines.push(styled_line(current, contains_selected, left_pad, theme));
     }
 
     if lines.is_empty() {
@@ -335,11 +496,12 @@ fn styled_line(
     mut spans: Vec<Span<'static>>,
     contains_selected: bool,
     left_pad: usize,
+    theme: Theme,
 ) -> WrappedLine {
     let mut line_spans = Vec::new();
     line_spans.push(Span::raw(" ".repeat(left_pad)));
     if contains_selected {
-        line_spans.push(Span::styled("▌ ", Style::default().fg(ACCENT)));
+        line_spans.push(Span::styled("▌ ", theme.fg(theme.accent)));
     } else {
         line_spans.push(Span::raw("  "));
     }
@@ -360,62 +522,26 @@ fn centered_line(text: &str, width: usize, left_pad: usize, style: Style) -> Lin
     ])
 }
 
-fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![text.to_string()];
-    }
-
-    let mut lines = Vec::new();
-    let mut current = String::new();
-
-    for word in text.split_whitespace() {
-        if current.is_empty() {
-            current.push_str(word);
-            continue;
-        }
-
-        if current.len() + 1 + word.len() <= width {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            lines.push(current);
-            current = word.to_string();
-        }
-    }
-
-    if !current.is_empty() {
-        lines.push(current);
-    }
-
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-
-    lines
-}
-
-fn render_side_panel(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_side_panel(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let [index_area, preview_area] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(8), Constraint::Min(8)])
         .areas(area);
 
-    render_side_index(frame, app, index_area);
-    render_side_preview(frame, app, preview_area);
+    render_side_index(frame, app, index_area, theme);
+    render_side_preview(frame, app, preview_area, theme);
 }
 
-fn render_side_index(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_side_index(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let border = if app.focus == Focus::Side {
-        STRONG
+        theme.strong
     } else {
-        MUTED
+        theme.muted
     };
     let title_style = if app.focus == Focus::Side {
-        Style::default()
-            .fg(TITLE_FOCUS)
-            .add_modifier(Modifier::BOLD)
+        theme.fg(theme.title_focus).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(ACCENT)
+        theme.fg(theme.accent)
     };
 
     let items = side_index_items(app);
@@ -425,50 +551,153 @@ fn render_side_index(frame: &mut Frame<'_>, app: &App, area: Rect) {
         selected,
         area.height.saturating_sub(4) as usize,
         app.focus == Focus::Side,
+        theme,
     );
 
     let paragraph = Paragraph::new(lines).block(
         Block::default()
             .title(Span::styled(app.side_panel_title(), title_style))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border))
+            .border_style(theme.fg(border))
             .padding(Padding::new(1, 1, 1, 0))
-            .style(Style::default().bg(PANEL)),
+            .style(theme.surface_style(theme.panel)),
     );
 
     frame.render_widget(paragraph, area);
 }
 
-fn render_side_preview(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_side_preview(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let border = if app.focus == Focus::Side {
-        STRONG
+        theme.strong
     } else {
-        MUTED
+        theme.muted
     };
     let title_style = if app.focus == Focus::Side {
-        Style::default()
-            .fg(TITLE_FOCUS)
-            .add_modifier(Modifier::BOLD)
+        theme.fg(theme.title_focus).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(ACCENT)
+        theme.fg(theme.accent)
     };
 
-    let (title, body) = side_preview_content(app);
-    let lines = wrap_text(&body, area.width.saturating_sub(4).max(12) as usize)
-        .into_iter()
-        .map(|line| Line::from(Span::styled(line, Style::default().fg(TEXT))))
-        .collect::<Vec<_>>();
+    let available_width = area.width.saturating_sub(4).max(12) as usize;
+    let content_width = available_width.min(READING_COLUMN_MAX);
+    let left_pad = available_width.saturating_sub(content_width) / 2;
+    let viewport_height = area.height.saturating_sub(4) as usize;
+    let (title, preview) = side_preview_view(app, content_width, left_pad, theme);
+    let scroll = center_preview_scroll(
+        viewport_height,
+        preview.selected_line_top,
+        preview.lines.len(),
+    ) as u16;
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+    let paragraph = Paragraph::new(preview.lines).scroll((scroll, 0)).block(
         Block::default()
             .title(Span::styled(title, title_style))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border))
+            .border_style(theme.fg(border))
             .padding(Padding::new(1, 1, 1, 0))
-            .style(Style::default().bg(PANEL)),
+            .style(theme.surface_style(theme.panel)),
     );
 
     frame.render_widget(paragraph, area);
+}
+
+fn side_preview_view(
+    app: &App,
+    width: usize,
+    left_pad: usize,
+    theme: Theme,
+) -> (String, ReaderView) {
+    match app.side_panel {
+        SidePanel::CrossReferences => {
+            if let Some(entry) = app.selected_cross_reference() {
+                if let Some(target) = entry.target {
+                    let chapter = app.bible().chapter_for(target);
+                    if !chapter.is_empty() {
+                        return (
+                            target.display(),
+                            build_chapter_context_view(
+                                chapter,
+                                target,
+                                app.current_translation(),
+                                &[],
+                                width,
+                                left_pad,
+                                theme,
+                            ),
+                        );
+                    }
+                    return (
+                        target.display(),
+                        message_preview("Verse text is not loaded.", theme),
+                    );
+                }
+                return (
+                    entry.target_label.clone(),
+                    message_preview(entry.target_label.as_str(), theme),
+                );
+            }
+            (
+                "Cross Reference Preview".to_string(),
+                message_preview("No cross reference selected.", theme),
+            )
+        }
+        SidePanel::Search => {
+            if let Some(hit) = app.selected_search_hit() {
+                let chapter = app.bible().chapter_for(hit.verse);
+                if !chapter.is_empty() {
+                    let terms = search_terms(&app.input);
+                    return (
+                        hit.verse.display(),
+                        build_chapter_context_view(
+                            chapter,
+                            hit.verse,
+                            app.current_translation(),
+                            &terms,
+                            width,
+                            left_pad,
+                            theme,
+                        ),
+                    );
+                }
+                return (
+                    hit.verse.display(),
+                    message_preview("Verse text is not loaded.", theme),
+                );
+            }
+            (
+                "Search Preview".to_string(),
+                message_preview("No search result selected.", theme),
+            )
+        }
+    }
+}
+
+fn message_preview(message: &str, theme: Theme) -> ReaderView {
+    ReaderView {
+        lines: vec![Line::from(Span::styled(
+            message.to_string(),
+            theme.fg(theme.muted),
+        ))],
+        selected_line_top: 0,
+    }
+}
+
+fn search_terms(input: &str) -> Vec<String> {
+    input
+        .split_whitespace()
+        .map(normalize_search_word)
+        .filter(|term| !term.is_empty())
+        .collect()
+}
+
+fn center_preview_scroll(
+    viewport_height: usize,
+    selected_line_top: usize,
+    total_lines: usize,
+) -> usize {
+    let max_scroll = total_lines.saturating_sub(viewport_height);
+    let midpoint = viewport_height / 2;
+    selected_line_top.saturating_sub(midpoint).min(max_scroll)
 }
 
 fn side_index_items(app: &App) -> Vec<String> {
@@ -518,9 +747,10 @@ fn side_index_lines(
     selected: Option<usize>,
     viewport_height: usize,
     focused: bool,
+    theme: Theme,
 ) -> Vec<Line<'static>> {
     if items.is_empty() {
-        return vec![Line::from(Span::styled("", Style::default().fg(MUTED)))];
+        return vec![Line::from(Span::styled("", theme.fg(theme.muted)))];
     }
 
     let selected = selected.unwrap_or(0).min(items.len().saturating_sub(1));
@@ -539,14 +769,11 @@ fn side_index_lines(
             let active = index == selected && focused;
             let prefix = if active { "› " } else { "  " };
             let style = if active {
-                Style::default()
-                    .bg(SELECT)
-                    .fg(TEXT)
-                    .add_modifier(Modifier::BOLD)
+                theme.selected()
             } else if index == selected {
-                Style::default().fg(ACCENT)
+                theme.fg(theme.accent)
             } else {
-                Style::default().fg(TEXT)
+                theme.fg(theme.text)
             };
             Line::from(vec![
                 Span::styled(prefix.to_string(), style),
@@ -556,77 +783,41 @@ fn side_index_lines(
         .collect()
 }
 
-fn side_preview_content(app: &App) -> (String, String) {
-    match app.side_panel {
-        SidePanel::CrossReferences => {
-            if let Some(entry) = app.selected_cross_reference() {
-                if let Some(target) = entry.target {
-                    if let Some(verse) = app.bible().verse(target) {
-                        return (target.display(), verse.text.clone());
-                    }
-                    return (target.display(), String::new());
-                }
-                return (entry.target_label.clone(), entry.target_label.clone());
-            }
-            (
-                "Cross Reference Preview".to_string(),
-                "No cross reference selected.".to_string(),
-            )
-        }
-        SidePanel::Search => {
-            if let Some(hit) = app.selected_search_hit() {
-                if let Some(verse) = app.bible().verse(hit.verse) {
-                    return (hit.verse.display(), verse.text.clone());
-                }
-                return (hit.verse.display(), String::new());
-            }
-            (
-                "Search Preview".to_string(),
-                "No search result selected.".to_string(),
-            )
-        }
-    }
-}
-
-fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect, theme: Theme) {
     let mut lines = vec![Line::from(vec![
-        Span::styled("Keys ", Style::default().fg(ACCENT)),
-        Span::styled("/ search", Style::default().fg(TEXT)),
+        Span::styled("Keys ", theme.fg(theme.accent)),
+        Span::styled("/ search", theme.fg(theme.text)),
         Span::raw("  "),
-        Span::styled("x refs", Style::default().fg(TEXT)),
+        Span::styled("x refs", theme.fg(theme.text)),
         Span::raw("  "),
-        Span::styled("g jump", Style::default().fg(TEXT)),
+        Span::styled("g jump", theme.fg(theme.text)),
         Span::raw("  "),
-        Span::styled("tab pane", Style::default().fg(TEXT)),
+        Span::styled("tab pane", theme.fg(theme.text)),
         Span::raw("  "),
-        Span::styled("j/k move", Style::default().fg(TEXT)),
+        Span::styled("j/k move", theme.fg(theme.text)),
         Span::raw("  "),
-        Span::styled("enter open", Style::default().fg(TEXT)),
+        Span::styled("enter open", theme.fg(theme.text)),
         Span::raw("  "),
-        Span::styled("u back", Style::default().fg(TEXT)),
+        Span::styled("u back", theme.fg(theme.text)),
         Span::raw("  "),
-        Span::styled("p fwd", Style::default().fg(TEXT)),
+        Span::styled("p fwd", theme.fg(theme.text)),
     ])];
 
     if let Some(label) = app.active_input_label() {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{label}> "),
-                Style::default().fg(STRONG).add_modifier(Modifier::BOLD),
+                theme.fg(theme.strong).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(app.input.as_str(), Style::default().fg(TEXT)),
+            Span::styled(app.input.as_str(), theme.fg(theme.text)),
         ]));
 
         let hints = app.input_hints().join("   ");
-        lines.push(Line::from(Span::styled(hints, Style::default().fg(MUTED))));
+        lines.push(Line::from(Span::styled(hints, theme.fg(theme.muted))));
     } else {
         lines.push(Line::from(Span::styled(
             app.status.as_str(),
-            Style::default().fg(MUTED),
-        )));
-        lines.push(Line::from(Span::styled(
-            app.history_summary(),
-            Style::default().fg(MUTED),
+            theme.fg(theme.muted),
         )));
         lines.push(Line::from(Span::styled(
             match (app.focus, app.side_panel) {
@@ -638,12 +829,12 @@ fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     "Side pane refs: top index, bottom full verse preview. j/k moves the index."
                 }
             },
-            Style::default().fg(MUTED),
+            theme.fg(theme.muted),
         )));
     }
 
     let footer = Paragraph::new(lines)
-        .style(Style::default().bg(BG))
+        .style(theme.bg_style())
         .block(Block::default().padding(Padding::new(1, 1, 0, 0)));
 
     frame.render_widget(footer, area);

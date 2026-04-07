@@ -7,8 +7,9 @@ use std::{
 
 use color_eyre::eyre::{Result, WrapErr};
 use quick_xml::{Reader, events::Event};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Ord, PartialOrd, Serialize)]
 pub struct VerseId {
     pub book: usize,
     pub chapter: u16,
@@ -1308,6 +1309,10 @@ const BOOKS: &[BookDef] = &[
 
 pub fn book_name(book: usize) -> &'static str {
     BOOKS[book].name
+}
+
+pub fn book_abbrev(book: usize) -> &'static str {
+    BOOKS[book].osis
 }
 
 pub fn suggest_books(input: &str, limit: usize) -> Vec<&'static str> {
