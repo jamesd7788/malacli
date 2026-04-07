@@ -52,17 +52,27 @@ pub struct Bible {
 }
 
 impl Bible {
-    pub fn load(osis_path: &Path, cross_refs_path: &Path) -> Result<Self> {
+    pub fn load(osis_path: &Path, cross_refs: &str) -> Result<Self> {
         let verses = load_verses(osis_path)?;
-        Self::from_verses(verses, cross_refs_path, true)
+        Self::from_verses(verses, cross_refs, true)
     }
 
-    pub fn load_window(osis_path: &Path, cross_refs_path: &Path, center: VerseId) -> Result<Self> {
+    pub fn load_from_str(xml: &str, cross_refs: &str) -> Result<Self> {
+        let verses = load_verses_from_str(xml)?;
+        Self::from_verses(verses, cross_refs, true)
+    }
+
+    pub fn load_window(osis_path: &Path, cross_refs: &str, center: VerseId) -> Result<Self> {
         let verses = load_window_verses(osis_path, center)?;
-        Self::from_verses(verses, cross_refs_path, false)
+        Self::from_verses(verses, cross_refs, false)
     }
 
-    fn from_verses(verses: Vec<Verse>, cross_refs_path: &Path, complete: bool) -> Result<Self> {
+    pub fn load_window_from_str(xml: &str, cross_refs: &str, center: VerseId) -> Result<Self> {
+        let verses = load_window_verses_from_str(xml, center)?;
+        Self::from_verses(verses, cross_refs, false)
+    }
+
+    fn from_verses(verses: Vec<Verse>, cross_refs: &str, complete: bool) -> Result<Self> {
         let mut by_id = HashMap::with_capacity(verses.len());
         let mut chapter_ranges = HashMap::new();
         let mut chapter_order = Vec::new();
@@ -89,7 +99,7 @@ impl Bible {
             chapter_ranges.insert((last.id.book, last.id.chapter), (range_start, verses.len()));
         }
 
-        let cross_references = load_cross_references(cross_refs_path, &by_id)?;
+        let cross_references = parse_cross_references(cross_refs, &by_id);
 
         Ok(Self {
             verses,
@@ -252,16 +262,19 @@ fn truncate_chars(text: &str, max_len: usize) -> String {
 fn load_verses(path: &Path) -> Result<Vec<Verse>> {
     let xml = fs::read_to_string(path)
         .wrap_err_with(|| format!("failed to read OSIS bible data from {}", path.display()))?;
+    load_verses_from_str(&xml)
+}
 
+fn load_verses_from_str(xml: &str) -> Result<Vec<Verse>> {
     if xml.contains("<XMLBIBLE") {
-        return load_xmlbible_verses(&xml);
+        return load_xmlbible_verses(xml);
     }
 
     if xml.contains("<bible>") {
-        return load_simple_bible_verses(&xml);
+        return load_simple_bible_verses(xml);
     }
 
-    let mut reader = Reader::from_str(&xml);
+    let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut verses = Vec::with_capacity(31_200);
@@ -320,7 +333,19 @@ fn load_verses(path: &Path) -> Result<Vec<Verse>> {
 fn load_window_verses(path: &Path, center: VerseId) -> Result<Vec<Verse>> {
     let file = File::open(path)
         .wrap_err_with(|| format!("failed to open bible data from {}", path.display()))?;
-    let mut reader = Reader::from_reader(BufReader::new(file));
+    load_window_verses_from_bufreader(BufReader::new(file), Some(path), center)
+}
+
+fn load_window_verses_from_str(xml: &str, center: VerseId) -> Result<Vec<Verse>> {
+    load_window_verses_from_bufreader(std::io::Cursor::new(xml.as_bytes()), None, center)
+}
+
+fn load_window_verses_from_bufreader<R: std::io::BufRead>(
+    source: R,
+    reopen_path: Option<&Path>,
+    center: VerseId,
+) -> Result<Vec<Verse>> {
+    let mut reader = Reader::from_reader(source);
     reader.config_mut().trim_text(true);
 
     let target_start = center.chapter.saturating_sub(1);
@@ -354,13 +379,25 @@ fn load_window_verses(path: &Path, center: VerseId) -> Result<Vec<Verse>> {
                     || name.as_ref() == b"chapter"
                     || name.as_ref() == b"verse"
                 {
-                    let file = File::open(path).wrap_err_with(|| {
-                        format!("failed to reopen bible data from {}", path.display())
-                    })?;
-                    let mut osis_reader = Reader::from_reader(BufReader::new(file));
-                    osis_reader.config_mut().trim_text(true);
+                    if let Some(path) = reopen_path {
+                        let file = File::open(path).wrap_err_with(|| {
+                            format!("failed to reopen bible data from {}", path.display())
+                        })?;
+                        let mut osis_reader = Reader::from_reader(BufReader::new(file));
+                        osis_reader.config_mut().trim_text(true);
+                        return load_osis_window_from_reader(
+                            osis_reader,
+                            center.book,
+                            target_start,
+                            target_end,
+                        );
+                    }
+                    // Embedded or string source: can't reopen, so parse the full content
+                    // and filter to the window. The reader has already consumed some bytes,
+                    // but for OSIS the detection happens early. We'll restart via the
+                    // remaining reader.
                     return load_osis_window_from_reader(
-                        osis_reader,
+                        reader,
                         center.book,
                         target_start,
                         target_end,
@@ -838,13 +875,10 @@ fn clean_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn load_cross_references(
-    path: &Path,
+fn parse_cross_references(
+    text: &str,
     verses: &HashMap<VerseId, usize>,
-) -> Result<HashMap<VerseId, Vec<CrossReference>>> {
-    let text = fs::read_to_string(path)
-        .wrap_err_with(|| format!("failed to read cross references from {}", path.display()))?;
-
+) -> HashMap<VerseId, Vec<CrossReference>> {
     let mut by_verse: HashMap<VerseId, Vec<CrossReference>> = HashMap::new();
 
     for (index, line) in text.lines().enumerate() {
@@ -879,7 +913,7 @@ fn load_cross_references(
         refs.truncate(24);
     }
 
-    Ok(by_verse)
+    by_verse
 }
 
 fn parse_single_or_range_target(input: &str) -> Option<&str> {

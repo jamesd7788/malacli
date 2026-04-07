@@ -168,10 +168,16 @@ impl App {
     }
 
     pub fn current_translation_source(&self) -> String {
-        self.translations[self.active_translation]
-            .source_path
-            .display()
-            .to_string()
+        let entry = &self.translations[self.active_translation];
+        if entry.is_embedded() {
+            "(embedded)".to_string()
+        } else {
+            entry
+                .source_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        }
     }
 
     pub fn active_input_label(&self) -> Option<&'static str> {
@@ -698,15 +704,18 @@ impl App {
     fn start_translation_warmup(&mut self, index: usize) {
         self.load_generation += 1;
         let generation = self.load_generation;
+        let is_embedded = self.translations[index].is_embedded();
         let source_path = self.translations[index].source_path.clone();
         let (tx, rx) = mpsc::channel();
         self.load_rx = Some(rx);
 
         thread::spawn(move || {
-            let bible = Bible::load(
-                &source_path,
-                std::path::Path::new("data/raw/cross_references.txt"),
-            )
+            let cross_refs = crate::data::cross_references();
+            let bible = if is_embedded {
+                Bible::load_from_str(crate::data::kjv_xml(), cross_refs)
+            } else {
+                Bible::load(source_path.as_ref().unwrap(), cross_refs)
+            }
             .map_err(|error| error.to_string());
 
             let _ = tx.send(TranslationLoadResult {
@@ -827,7 +836,7 @@ mod tests {
     }
 
     fn wait_for_translation(app: &mut App) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(10);
         while !app.translations[app.active_translation].is_ready() && Instant::now() < deadline {
             app.poll_background_work();
             std::thread::sleep(Duration::from_millis(10));

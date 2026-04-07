@@ -7,16 +7,17 @@ use std::{
 use color_eyre::eyre::Result;
 
 use crate::bible::Bible;
+use crate::config;
+use crate::data;
 
-const CROSS_REFS_PATH: &str = "data/raw/cross_references.txt";
-const DEFAULT_KJV_PATH: &str = "data/raw/eng-kjv.osis.xml";
 const OSIS_DIR_ENV: &str = "TUI_BIBLE_OSIS_DIR";
 const DEFAULT_TRANSLATION_ENV: &str = "TUI_BIBLE_TRANSLATION";
 const FALLBACK_LOCAL_TRANSLATIONS_DIR: &str = "/Users/james/Downloads/media-tool-kit-xml-bibles";
 
 pub struct TranslationEntry {
     pub code: String,
-    pub source_path: PathBuf,
+    pub source_path: Option<PathBuf>,
+    embedded: bool,
     bible: Option<Bible>,
     failed: bool,
 }
@@ -25,7 +26,18 @@ impl TranslationEntry {
     pub fn new(code: String, source_path: PathBuf) -> Self {
         Self {
             code,
-            source_path,
+            source_path: Some(source_path),
+            embedded: false,
+            bible: None,
+            failed: false,
+        }
+    }
+
+    fn embedded(code: String) -> Self {
+        Self {
+            code,
+            source_path: None,
+            embedded: true,
             bible: None,
             failed: false,
         }
@@ -37,6 +49,10 @@ impl TranslationEntry {
 
     pub fn is_ready(&self) -> bool {
         self.bible.as_ref().is_some_and(Bible::is_complete)
+    }
+
+    pub fn is_embedded(&self) -> bool {
+        self.embedded
     }
 
     pub fn load_window(&mut self, center: crate::bible::VerseId) -> Result<bool> {
@@ -52,7 +68,12 @@ impl TranslationEntry {
             return Ok(true);
         }
 
-        let bible = Bible::load_window(&self.source_path, Path::new(CROSS_REFS_PATH), center)?;
+        let cross_refs = data::cross_references();
+        let bible = if self.embedded {
+            Bible::load_window_from_str(data::kjv_xml(), cross_refs, center)?
+        } else {
+            Bible::load_window(self.source_path.as_ref().unwrap(), cross_refs, center)?
+        };
         if bible.first_verse().is_none() {
             self.failed = true;
             return Ok(false);
@@ -70,7 +91,12 @@ impl TranslationEntry {
             return Ok(false);
         }
 
-        let bible = Bible::load(&self.source_path, Path::new(CROSS_REFS_PATH))?;
+        let cross_refs = data::cross_references();
+        let bible = if self.embedded {
+            Bible::load_from_str(data::kjv_xml(), cross_refs)?
+        } else {
+            Bible::load(self.source_path.as_ref().unwrap(), cross_refs)?
+        };
         if bible.first_verse().is_none() {
             self.failed = true;
             return Ok(false);
@@ -99,16 +125,20 @@ impl TranslationRegistry {
     pub fn load() -> Result<Self> {
         let mut by_code = BTreeMap::new();
 
-        let default_path = PathBuf::from(DEFAULT_KJV_PATH);
         by_code.insert(
             "kjv".to_string(),
-            TranslationEntry::new("kjv".to_string(), default_path),
+            TranslationEntry::embedded("kjv".to_string()),
         );
 
-        let local_root = env::var(OSIS_DIR_ENV).ok().map(PathBuf::from).or_else(|| {
-            let fallback = PathBuf::from(FALLBACK_LOCAL_TRANSLATIONS_DIR);
-            fallback.exists().then_some(fallback)
-        });
+        let cfg = config::load();
+        let local_root = env::var(OSIS_DIR_ENV)
+            .ok()
+            .map(PathBuf::from)
+            .or(cfg.bible_dir)
+            .or_else(|| {
+                let fallback = PathBuf::from(FALLBACK_LOCAL_TRANSLATIONS_DIR);
+                fallback.exists().then_some(fallback)
+            });
 
         if let Some(root) = local_root {
             for path in discover_xml_files(&root)? {

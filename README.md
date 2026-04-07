@@ -19,13 +19,28 @@ The current product direction is reader-first with study power: beautiful readin
 - Lazy local translation loading with bundled KJV fallback
 - Optional terminal color passthrough theme
 
-## Quick Start
+## Install
+
+### Homebrew (macOS / Linux)
 
 ```bash
-cargo run
+brew tap jamesd7788/tui-bible
+brew install tui-bible
 ```
 
-Release build:
+### AUR (Arch Linux)
+
+```bash
+yay -S tui-bible
+```
+
+### Cargo
+
+```bash
+cargo install --git https://github.com/jamesd7788/tui-bible
+```
+
+### From source
 
 ```bash
 cargo build --release
@@ -120,32 +135,43 @@ The downloaded zip artifact is ignored; extracted app data is tracked.
 
 ## Local Translations
 
-The app always includes bundled KJV and can discover additional local XML Bible files.
+KJV is bundled in the binary. Additional Bible XML files can be loaded from a local directory.
 
-Supported local formats currently include:
+Supported local formats:
 
 - OSIS XML
 - `XMLBIBLE` style XML
 - simple `<bible><b><c><v>` style XML
 
-Point the app at a local translation directory:
+Set a translations directory (persists across sessions):
+
+```bash
+tui-bible set-bible-dir ~/bibles
+```
+
+Clear it:
+
+```bash
+tui-bible unset-bible-dir
+```
+
+Or use an environment variable (takes precedence over config):
 
 ```bash
 export TUI_BIBLE_OSIS_DIR=$HOME/src/osis-bibles
-cargo run
+tui-bible
 ```
 
 Prefer a translation on startup:
 
 ```bash
 export TUI_BIBLE_TRANSLATION=esv
-cargo run
+tui-bible
 ```
 
 Notes:
 
-- If `TUI_BIBLE_OSIS_DIR` contains an `en/` directory, the app scans that subtree for `*.xml`.
-- On this development machine, the app also checks `/Users/james/Downloads/media-tool-kit-xml-bibles` if it exists.
+- If the directory contains an `en/` subdirectory, the app scans that subtree for `*.xml`.
 - Additional translations are loaded lazily; the current chapter appears first, then the full translation warms in memory.
 - Do not commit or redistribute private/licensed translations.
 
@@ -169,25 +195,9 @@ Ignored paths include:
 - `*.local.xml`
 - downloaded zip artifacts in `data/raw/`
 
-## Distribution Notes
+## Distribution
 
-The app currently expects bundled data under `data/raw/` relative to the working directory. Before a polished release, add release-safe data path resolution such as:
-
-1. `TUI_BIBLE_DATA_DIR`
-2. data directory beside the binary
-3. platform data dir
-4. development fallback to repo `data/raw/`
-
-A minimal distributable should include:
-
-```text
-tui-bible
-data/raw/eng-kjv.osis.xml
-data/raw/cross_references.txt
-README.md
-LICENSE
-NOTICE
-```
+KJV text and cross-reference data are compressed and embedded in the binary at build time. The release binary is self-contained (~6 MB) with no external data dependencies.
 
 ## Backburner Ideas
 
