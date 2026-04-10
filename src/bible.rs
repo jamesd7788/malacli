@@ -224,6 +224,22 @@ impl Bible {
         })
     }
 
+    pub fn verse_count(&self) -> usize {
+        self.verses.len()
+    }
+
+    pub fn chapter_list(&self) -> &[(usize, u16)] {
+        &self.chapter_order
+    }
+
+    pub fn chapters_for_book(&self, book: usize) -> Vec<u16> {
+        self.chapter_order
+            .iter()
+            .filter(|(b, _)| *b == book)
+            .map(|(_, c)| *c)
+            .collect()
+    }
+
     pub fn verse_preview(&self, id: VerseId, max_len: usize) -> String {
         let Some(verse) = self.verse(id) else {
             return id.display();
@@ -1340,6 +1356,8 @@ const BOOKS: &[BookDef] = &[
         aliases: &["revelation", "rev", "re", "the revelation"],
     },
 ];
+
+pub const BOOK_COUNT: usize = 66;
 
 pub fn book_name(book: usize) -> &'static str {
     BOOKS[book].name

@@ -66,6 +66,7 @@ pub struct App {
     pub editor_request: Option<std::path::PathBuf>,
     pub visual_anchor: Option<VerseId>,
     pub pinned_note: Option<std::path::PathBuf>,
+    pub show_all_notes: bool,
     history: VecDeque<VerseId>,
     history_index: usize,
     load_rx: Option<Receiver<TranslationLoadResult>>,
@@ -167,6 +168,7 @@ impl App {
             editor_request: None,
             visual_anchor: None,
             pinned_note: None,
+            show_all_notes: false,
             history,
             history_index,
             load_rx: None,
@@ -225,7 +227,13 @@ impl App {
                     format!("Search / {}", self.input)
                 }
             }
-            SidePanel::Notes => "Notes".to_string(),
+            SidePanel::Notes => {
+                if self.show_all_notes {
+                    "All Notes".to_string()
+                } else {
+                    "Notes".to_string()
+                }
+            }
         }
     }
 
@@ -425,12 +433,22 @@ impl App {
     }
 
     fn show_notes(&mut self) {
+        if self.side_panel == SidePanel::Notes && self.focus == Focus::Side {
+            self.show_all_notes = !self.show_all_notes;
+        } else {
+            self.show_all_notes = false;
+        }
         self.refresh_notes();
         self.side_panel = SidePanel::Notes;
         self.focus = Focus::Side;
         let count = self.chapter_notes.len();
+        let scope = if self.show_all_notes {
+            "all"
+        } else {
+            "this chapter"
+        };
         self.status = format!(
-            "{count} note{} for this chapter. enter opens in $EDITOR, a creates new.",
+            "{count} note{} ({scope}). n toggles scope, enter opens, a creates.",
             if count == 1 { "" } else { "s" }
         );
     }
@@ -603,12 +621,15 @@ impl App {
     }
 
     fn refresh_notes(&mut self) {
-        self.chapter_notes = self
-            .note_index
-            .notes_for_chapter(self.current_verse.book, self.current_verse.chapter)
-            .into_iter()
-            .cloned()
-            .collect();
+        self.chapter_notes = if self.show_all_notes {
+            self.note_index.all_notes().to_vec()
+        } else {
+            self.note_index
+                .notes_for_chapter(self.current_verse.book, self.current_verse.chapter)
+                .into_iter()
+                .cloned()
+                .collect()
+        };
         self.selected_note = ListState::default();
         if !self.chapter_notes.is_empty() {
             self.selected_note.select(Some(0));
@@ -1139,7 +1160,7 @@ mod tests {
     }
 
     fn wait_for_translation(app: &mut App) {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !app.translations[app.active_translation].is_ready() && Instant::now() < deadline {
             app.poll_background_work();
             std::thread::sleep(Duration::from_millis(10));

@@ -39,8 +39,11 @@ struct Theme {
 
 impl Theme {
     fn current() -> Self {
-        match std::env::var("MALACLI_THEME") {
-            Ok(value) if value.eq_ignore_ascii_case("terminal") => Self::terminal(),
+        let theme = std::env::var("MALACLI_THEME")
+            .ok()
+            .or_else(|| crate::config::load().theme);
+        match theme.as_deref() {
+            Some(v) if v.eq_ignore_ascii_case("terminal") => Self::terminal(),
             _ => Self::monastic(),
         }
     }

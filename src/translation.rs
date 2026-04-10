@@ -47,6 +47,10 @@ impl TranslationEntry {
         self.bible.as_ref()
     }
 
+    pub fn take_bible(&mut self) -> Option<Bible> {
+        self.bible.take()
+    }
+
     pub fn is_ready(&self) -> bool {
         self.bible.as_ref().is_some_and(Bible::is_complete)
     }
@@ -152,7 +156,8 @@ impl TranslationRegistry {
 
         let preferred = env::var(DEFAULT_TRANSLATION_ENV)
             .ok()
-            .map(|value| value.to_ascii_lowercase());
+            .map(|value| value.to_ascii_lowercase())
+            .or_else(|| cfg.translation.map(|t| t.to_ascii_lowercase()));
 
         Ok(Self {
             entries: by_code.into_values().collect(),
