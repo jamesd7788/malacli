@@ -1,30 +1,30 @@
 class Malacli < Formula
   desc "A fast, keyboard-first terminal Bible reader"
   homepage "https://github.com/jamesd7788/malacli"
-  version "0.3.0"
+  version "0.4.0"
   license "MIT"
 
   on_macos do
     on_arm do
       url "https://github.com/jamesd7788/malacli/releases/download/v#{version}/malacli-aarch64-apple-darwin.tar.gz"
-      sha256 "4bba11afb056d8371d1d1a465fe095a7c5a6a620509819236c51ee26656cd5cc"
+      sha256 "f0745c3dd7d7627e6e6ea4d1da9847474936b75ebcc0ce333800bdd6d31c43ef"
     end
 
     on_intel do
       url "https://github.com/jamesd7788/malacli/releases/download/v#{version}/malacli-x86_64-apple-darwin.tar.gz"
-      sha256 "6f291527ef2ad46a4a18b3afa886f1e7eff4bf09d022a83e0f4544fb94589e96"
+      sha256 "9a7a09fef4d910ba1b0bb097d5dc97b4bb10b2223bd21e408614c1d889340042"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/jamesd7788/malacli/releases/download/v#{version}/malacli-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "1c33f08248ba70541d5ce701176465db901a52929184e3a9b5a595c4bcf83555"
+      sha256 "d13065375d9b5f530058db9793adf1525e6f120c6d3ff9096f6d9ae2ac0ead27"
     end
 
     on_intel do
       url "https://github.com/jamesd7788/malacli/releases/download/v#{version}/malacli-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "024cfdd74ec2af622db0cdd2032067c7e57648868a0127987dcc67a0458d6f89"
+      sha256 "6917130f335f9d5329ce963f13aad2972eba84a80bb43f215b3db1f18c527e36"
     end
   end
 
