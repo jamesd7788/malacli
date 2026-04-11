@@ -49,13 +49,49 @@ cargo build --release
 ./target/release/malacli
 ```
 
-## Controls
+## CLI Commands
+
+```bash
+malacli                         # launch the TUI reader
+malacli john 3:16               # print a verse
+malacli john 3:16-18            # print a verse range
+malacli chapter john 3          # print full chapter
+malacli context john 3:16      # surrounding verses with marker
+malacli search "love"           # search scripture
+malacli ref john 3:16           # cross references
+malacli count love              # word occurrence count
+malacli parallel john 3:16     # compare across loaded translations
+malacli json john 3:16          # structured json output
+malacli books                   # list all books with OSIS codes
+malacli toc                     # table of contents
+malacli outline genesis         # chapter outline for a book
+malacli random                  # random verse
+malacli history                 # session navigation trail
+malacli notes                   # list all notes
+malacli info                    # config and session state
+```
+
+## Configuration
+
+```bash
+malacli config                  # show all settings
+malacli set translation esv     # default translation
+malacli set theme terminal      # terminal color passthrough
+malacli set editor nvim         # note editor
+malacli set bible-dir ~/bibles  # translations directory
+malacli set <key> --unset       # clear any setting
+malacli get <key>               # get a single value
+```
+
+Environment variables (`MALACLI_OSIS_DIR`, `MALACLI_TRANSLATION`, `MALACLI_THEME`, `MALACLI_SESSION`) override config when set.
+
+## Reader Controls
 
 - `q`: quit
 - `g`: jump to a passage
 - `/`: search scripture
 - `x`: switch side pane to cross references
-- `n`: switch side pane to notes
+- `n`: switch side pane to notes (press again to toggle chapter/all)
 - `a`: create note at current verse (or add to pinned note)
 - `P`: pin/unpin a note
 - `tab`: toggle reader/side pane focus
@@ -116,43 +152,11 @@ jump Col 3 -> l to Col 4 -> l to 1 Thess 1 -> u returns to Col 4
 
 ## Themes
 
-Default theme is the built-in warm/monastic palette.
-
-Use your terminal foreground/background colors instead:
+Default theme is the built-in warm/monastic palette. Switch to terminal color passthrough:
 
 ```bash
-MALACLI_THEME=terminal malacli
+malacli set theme terminal
 ```
-
-## Session Restore
-
-The app saves session state on normal quit and restores it on startup.
-
-Default session path:
-
-```text
-$XDG_CONFIG_HOME/malacli/session.toml
-```
-
-Fallback:
-
-```text
-$HOME/.config/malacli/session.toml
-```
-
-Override the session path:
-
-```bash
-MALACLI_SESSION=/path/to/session.toml malacli
-```
-
-Clear session state:
-
-```bash
-rm "$HOME/.config/malacli/session.toml"
-```
-
-If another app instance is still running, it can recreate the file on exit.
 
 ## Data Sources
 
@@ -179,30 +183,16 @@ Supported local formats:
 - `XMLBIBLE` style XML
 - simple `<bible><b><c><v>` style XML
 
-Set a translations directory (persists across sessions):
+Set a translations directory:
 
 ```bash
-malacli set-bible-dir ~/bibles
+malacli set bible-dir ~/bibles
 ```
 
-Clear it:
+Set a default translation:
 
 ```bash
-malacli unset-bible-dir
-```
-
-Or use an environment variable (takes precedence over config):
-
-```bash
-export MALACLI_OSIS_DIR=$HOME/src/osis-bibles
-malacli
-```
-
-Prefer a translation on startup:
-
-```bash
-export MALACLI_TRANSLATION=esv
-malacli
+malacli set translation esv
 ```
 
 Notes:
