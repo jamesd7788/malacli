@@ -34,6 +34,10 @@ the homebrew tap is `jamesd7788/homebrew-tap` (shared tap, not a dedicated one).
 - verse files live in `notes/verses/` subfolder, created lazily on note creation. named `book_abbrevChapter-Verse.md` e.g. `john3-16.md`. notes use `[[john3-16]]` wikilinks for obsidian integration.
 - `$EDITOR` integration: tui suspends via `ratatui::restore()`, spawns editor, then `ratatui::init()` to resume. the Tui struct must be replaced after restore.
 - config lives at `~/.config/malacli/config.toml`. fields: `bible_dir`, `translation`, `theme`, `editor`. all optional, `skip_serializing_if = "Option::is_none"`.
+- omarchy theme integration lives in `src/omarchy.rs`. reads the live palette from `~/.local/state/omarchy/current/theme/colors.toml` (`XDG_STATE_HOME` respected). `MALACLI_OMARCHY_THEME` points at a colors.toml directly, which is how the tests fake a desktop theme. everything returns `Option` and falls back to the monastic palette, so the binary stays portable off omarchy.
+- `colors.toml` is parsed by hand rather than via the `toml` crate: a malformed line should cost one colour, not the whole theme.
+- theme resolution is cached per-frame in `ui::Theme::cached()`, keyed on `omarchy::revision()` (newest mtime of the hook stamp + colors.toml). that cache IS the live-reload mechanism — the palette rebuilds when the token moves. before this, `Theme::current()` did a config read on every single frame.
+- `pkg/omarchy/malacli-theme-hook` is a theme-set hook that only touches a stamp file. it's an optimisation: colors.toml is watched too, so live reload works without it.
 
 ## Key Learnings (stuff that bit us)
 
@@ -44,7 +48,9 @@ the homebrew tap is `jamesd7788/homebrew-tap` (shared tap, not a dedicated one).
 - **colons in filenames**: don't work on macos (classic mac path separator) or windows. verse file slugs use hyphens: `john3-16.md` not `john3:16.md`.
 - **homebrew requires a tap**: can't `brew install` a local formula file directly. must be in a tap directory structure.
 - **`cargo fmt` import ordering**: build.rs imports get reordered by fmt. don't fight it.
+- **env vars in tests race**: `MALACLI_OMARCHY_THEME` is process-global and the test runner is multi-threaded, so the omarchy + ui theme tests flaked ~1 in 5 runs until both took `omarchy::env_lock()`. any new test that sets an env var must take that guard.
+- **raw strings vs hex colours**: `r#"..."#` terminates early on a `"#rrggbb"` value. theme fixtures need `r##"..."##`.
 
 ## CLI vs TUI
 
-`malacli` with no args launches the TUI. with args it's a CLI tool. the `load_bible()` helper in main.rs respects the configured translation (config → env var → kjv fallback) for all CLI output.
+`malacli` with no args launches the TUI. `malacli theme-info` is an undocumented diagnostic that dumps what the omarchy integration currently sees. with args it's a CLI tool. the `load_bible()` helper in main.rs respects the configured translation (config → env var → kjv fallback) for all CLI output.

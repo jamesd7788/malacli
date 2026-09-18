@@ -34,12 +34,24 @@ impl Config {
                 .as_deref()
                 .unwrap_or("(not set, defaults to kjv)")
         );
-        println!(
-            "theme:        {}",
-            self.theme
-                .as_deref()
-                .unwrap_or("(not set, defaults to monastic)")
-        );
+        let theme = self
+            .theme
+            .as_deref()
+            .unwrap_or("(not set, defaults to monastic)");
+        if self
+            .theme
+            .as_deref()
+            .is_some_and(|t| t.eq_ignore_ascii_case("omarchy"))
+        {
+            // Name the desktop theme being followed -- otherwise "omarchy" alone
+            // gives no clue whether the palette was actually found.
+            match crate::omarchy::theme_name() {
+                Some(name) => println!("theme:        omarchy (following {name})"),
+                None => println!("theme:        omarchy (no desktop theme found, using monastic)"),
+            }
+        } else {
+            println!("theme:        {theme}");
+        }
         println!(
             "editor:       {}",
             self.editor

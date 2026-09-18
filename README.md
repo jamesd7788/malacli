@@ -20,6 +20,7 @@ The current product direction is reader-first with study power: beautiful readin
 - Session restore for current passage, pane state, translation, and history
 - Lazy local translation loading with bundled KJV fallback
 - Optional terminal color passthrough theme
+- Omarchy desktop theme integration, recolouring live when you switch themes
 
 ## Install
 
@@ -77,13 +78,14 @@ malacli info                    # config and session state
 malacli config                  # show all settings
 malacli set translation esv     # default translation
 malacli set theme terminal      # terminal color passthrough
+malacli set theme omarchy       # follow the Omarchy desktop theme
 malacli set editor nvim         # note editor
 malacli set bible-dir ~/bibles  # translations directory
 malacli set <key> --unset       # clear any setting
 malacli get <key>               # get a single value
 ```
 
-Environment variables (`MALACLI_OSIS_DIR`, `MALACLI_TRANSLATION`, `MALACLI_THEME`, `MALACLI_SESSION`) override config when set.
+Environment variables (`MALACLI_OSIS_DIR`, `MALACLI_TRANSLATION`, `MALACLI_THEME`, `MALACLI_OMARCHY_THEME`, `MALACLI_SESSION`) override config when set.
 
 ## Reader Controls
 
@@ -157,6 +159,39 @@ Default theme is the built-in warm/monastic palette. Switch to terminal color pa
 ```bash
 malacli set theme terminal
 ```
+
+### Omarchy
+
+On [Omarchy](https://omarchy.org/), malacli can wear the desktop theme:
+
+```bash
+malacli set theme omarchy
+```
+
+It reads the live palette from `~/.local/state/omarchy/current/theme/colors.toml`,
+which Omarchy repoints whenever you run `omarchy theme set`. Themes that omit a
+colour fall back to the monastic palette for that slot, so a sparse theme still
+renders a readable screen.
+
+Install the theme-set hook to make an already-open reader recolour the moment
+you change themes:
+
+```bash
+./pkg/omarchy/install-hook          # ./pkg/omarchy/install-hook --uninstall to remove
+```
+
+The hook is optional. malacli also watches `colors.toml` itself, so a running
+reader picks up a theme change either way -- the hook just removes the wait.
+
+To check what malacli is reading:
+
+```bash
+malacli theme-info
+```
+
+Off Omarchy the theme falls back to the monastic palette, so the setting is
+harmless on macOS and other Linux desktops. To borrow a palette anywhere, point
+`MALACLI_OMARCHY_THEME` at any Omarchy-style `colors.toml`.
 
 ## Data Sources
 

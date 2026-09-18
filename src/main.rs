@@ -7,6 +7,7 @@ mod data;
 mod event;
 #[allow(dead_code)]
 mod note;
+mod omarchy;
 mod session;
 mod translation;
 mod tui;
@@ -43,6 +44,7 @@ fn main() -> Result<()> {
         "set" => cmd_set(&args[1..]),
         "get" => cmd_get(&args[1..]),
         "config" => cmd_config(),
+        "theme-info" => cmd_theme_info(),
         "search" => cmd_search(&args[1..]),
         "books" => cmd_books(),
         "toc" => cmd_toc(),
@@ -589,6 +591,45 @@ fn unset_bible_dir() -> Result<()> {
     Ok(())
 }
 
+/// Report what the Omarchy integration currently sees.
+///
+/// Undocumented in `--help` on purpose: it exists for diagnosing "my colours
+/// look wrong" reports, where the useful question is whether we found a
+/// palette at all and which keys it actually carried.
+fn cmd_theme_info() {
+    match omarchy::theme_name() {
+        Some(name) => println!("omarchy theme:  {name}"),
+        None => println!("omarchy theme:  (none found)"),
+    }
+    match omarchy::palette() {
+        Some(palette) => {
+            println!(
+                "mode:           {}",
+                if palette.light { "light" } else { "dark" }
+            );
+            let show = |label: &str, value: &Option<String>| {
+                println!(
+                    "{label:<15} {}",
+                    value
+                        .as_deref()
+                        .map(|v| format!("#{v}"))
+                        .unwrap_or_else(|| "-".into())
+                );
+            };
+            show("background", &palette.background);
+            show("panel", &palette.lighter_background);
+            show("foreground", &palette.foreground);
+            show("bright_fg", &palette.bright_foreground);
+            show("dark_fg", &palette.dark_foreground);
+            show("muted", &palette.muted);
+            show("accent", &palette.accent);
+            show("selection", &palette.selection);
+            show("yellow", &palette.yellow);
+        }
+        None => println!("palette:        (not found -- malacli uses its built-in theme)"),
+    }
+}
+
 fn cmd_config() {
     let cfg = config::load();
     cfg.display();
@@ -673,14 +714,24 @@ fn cmd_set(args: &[String]) {
                 println!("theme cleared (defaults to monastic).");
             } else {
                 let val = value.unwrap_or_else(|| {
-                    eprintln!("usage: malacli set theme <monastic|terminal>");
+                    eprintln!("usage: malacli set theme <monastic|terminal|omarchy>");
                     process::exit(1);
                 });
                 match val.to_ascii_lowercase().as_str() {
                     "monastic" | "terminal" => {}
+                    "omarchy" => {
+                        if omarchy::palette().is_none() {
+                            // Not an error: the theme is legitimate to set on a
+                            // machine that gains Omarchy later, and it falls back
+                            // to monastic meanwhile. Just don't let it look broken.
+                            eprintln!(
+                                "note: no Omarchy theme found -- using the monastic palette until one is"
+                            );
+                        }
+                    }
                     _ => {
                         eprintln!("unknown theme: {val}");
-                        eprintln!("valid themes: monastic, terminal");
+                        eprintln!("valid themes: monastic, terminal, omarchy");
                         process::exit(1);
                     }
                 }
@@ -749,7 +800,7 @@ USAGE
 CONFIG KEYS
   bible-dir      path to local translations directory
   translation    default translation code (e.g. esv, nkjv)
-  theme          monastic (default) or terminal
+  theme          monastic (default), terminal, or omarchy
   editor         command for note editing (defaults to $EDITOR or vim)
 
 READER CONTROLS (TUI mode)
@@ -772,7 +823,8 @@ READER CONTROLS (TUI mode)
 ENVIRONMENT
   MALACLI_OSIS_DIR        override translations directory
   MALACLI_TRANSLATION     preferred translation on startup
-  MALACLI_THEME           'terminal' for color passthrough
+  MALACLI_THEME           'terminal' passthrough or 'omarchy' desktop theme
+  MALACLI_OMARCHY_THEME   path to a colors.toml to theme from directly
   MALACLI_SESSION         override session file path
 
 CONFIG
