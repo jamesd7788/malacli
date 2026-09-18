@@ -1,3 +1,5 @@
+use std::{cell::RefCell, time::SystemTime};
+
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -9,6 +11,7 @@ use ratatui::{
 use crate::{
     app::{App, Focus, InputMode, SidePanel},
     bible::{Verse, book_name},
+    omarchy,
 };
 
 const BG: Color = Color::Rgb(23, 18, 14);
@@ -38,13 +41,103 @@ struct Theme {
 }
 
 impl Theme {
+    /// Resolve the configured theme, reading the desktop palette when the
+    /// `omarchy` theme is selected.
+    ///
+    /// Callers should prefer [`Theme::cached`]: this hits the disk, and the
+    /// renderer runs it every frame.
     fn current() -> Self {
-        let theme = std::env::var("MALACLI_THEME")
+        let name = std::env::var("MALACLI_THEME")
             .ok()
             .or_else(|| crate::config::load().theme);
-        match theme.as_deref() {
+        match name.as_deref() {
             Some(v) if v.eq_ignore_ascii_case("terminal") => Self::terminal(),
+            Some(v) if v.eq_ignore_ascii_case("omarchy") => Self::omarchy(),
             _ => Self::monastic(),
+        }
+    }
+
+    /// The theme for this frame.
+    ///
+    /// Re-resolving on every frame would mean a config read plus a
+    /// `colors.toml` read per draw, so the result is cached. The cache is
+    /// invalidated by [`omarchy::revision`], which moves when the desktop
+    /// theme changes — that's what makes the TUI recolour live rather than
+    /// only at startup.
+    fn cached() -> Self {
+        thread_local! {
+            static CACHE: RefCell<Option<(Option<SystemTime>, Theme)>> =
+                const { RefCell::new(None) };
+        }
+
+        let revision = omarchy::revision();
+        CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some((cached_revision, theme)) = cache.as_ref()
+                && *cached_revision == revision
+            {
+                return *theme;
+            }
+            let theme = Self::current();
+            *cache = Some((revision, theme));
+            theme
+        })
+    }
+
+    /// Map the live Omarchy palette onto malacli's slots.
+    ///
+    /// Falls back to the built-in monastic palette off Omarchy, and per-slot
+    /// where a theme omits a key, so a sparse `colors.toml` still yields a
+    /// readable screen rather than a half-painted one.
+    fn omarchy() -> Self {
+        let Some(palette) = omarchy::palette() else {
+            return Self::monastic();
+        };
+
+        let fallback = Self::monastic();
+        let color = |hex: &Option<String>, default: Color| {
+            hex.as_deref()
+                .and_then(omarchy::rgb)
+                .map(|(r, g, b)| Color::Rgb(r, g, b))
+                .unwrap_or(default)
+        };
+
+        let background = color(&palette.background, fallback.bg);
+        let foreground = color(&palette.foreground, fallback.text);
+        let accent = color(&palette.accent, fallback.accent);
+
+        Self {
+            // The desktop palette is opaque by design: a theme that specifies
+            // a background means it. Terminal passthrough stays its own theme.
+            transparent: false,
+            bg: background,
+            // `lighter_background` is the panel surface in every Omarchy
+            // theme; where it's missing, panels merge into the background,
+            // which is the correct degraded look rather than a wrong colour.
+            panel: color(&palette.lighter_background, background),
+            text: foreground,
+            // `muted` is a border/dim colour. `dark_foreground` is the closer
+            // match for dim *text*, so prefer it and fall back to muted.
+            muted: color(
+                &palette.dark_foreground.clone().or(palette.muted.clone()),
+                fallback.muted,
+            ),
+            accent,
+            select: color(&palette.selection, fallback.select),
+            // Emphasis wants a warm pop; Omarchy's yellow is the closest
+            // analogue to the monastic gold, with accent as the backstop.
+            strong: color(
+                &palette.yellow.clone().or(palette.bright_yellow.clone()),
+                accent,
+            ),
+            title_focus: color(&palette.bright_foreground, accent),
+            reader_selected_text: color(
+                &palette
+                    .bright_foreground
+                    .clone()
+                    .or(palette.foreground.clone()),
+                foreground,
+            ),
         }
     }
 
@@ -115,7 +208,7 @@ impl Theme {
 }
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
-    let theme = Theme::current();
+    let theme = Theme::cached();
 
     frame.render_widget(Block::default().style(theme.bg_style()), frame.area());
 
@@ -968,4 +1061,78 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         lines.push(String::new());
     }
     lines
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    fn write_colors(name: &str, body: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("malacli-{name}-colors.toml"));
+        std::fs::write(&path, body).expect("write fixture");
+        path
+    }
+
+    /// The env overrides are process-global, so the theme tests share one test
+    /// to avoid racing each other under the default parallel runner.
+    #[test]
+    fn omarchy_theme_maps_and_degrades() {
+        let _guard = omarchy::env_lock();
+        let full = write_colors(
+            "full",
+            concat!(
+                "mode = \"dark\"\n",
+                "background = \"#1a1b26\"\n",
+                "lighter_background = \"#24283b\"\n",
+                "foreground = \"#a9b1d6\"\n",
+                "bright_foreground = \"#c0caf5\"\n",
+                "dark_foreground = \"#565f89\"\n",
+                "accent = \"#7aa2f7\"\n",
+                "selection = \"#292e42\"\n",
+                "yellow = \"#e0af68\"\n",
+            ),
+        );
+
+        unsafe { std::env::set_var("MALACLI_THEME", "omarchy") };
+        unsafe { std::env::set_var("MALACLI_OMARCHY_THEME", &full) };
+
+        let theme = Theme::current();
+        assert_eq!(theme.bg, Color::Rgb(26, 27, 38));
+        assert_eq!(theme.panel, Color::Rgb(36, 40, 59));
+        assert_eq!(theme.text, Color::Rgb(169, 177, 214));
+        assert_eq!(theme.accent, Color::Rgb(122, 162, 247));
+        assert_eq!(theme.select, Color::Rgb(41, 46, 66));
+        assert_eq!(theme.strong, Color::Rgb(224, 175, 104));
+        assert_eq!(theme.title_focus, Color::Rgb(192, 202, 245));
+        // The desktop palette is painted, not passed through.
+        assert!(!theme.transparent);
+
+        // A theme carrying only an accent still yields a usable screen: every
+        // other slot falls back rather than rendering a hole.
+        let sparse = write_colors("sparse", "accent = \"#ff0000\"\n");
+        unsafe { std::env::set_var("MALACLI_OMARCHY_THEME", &sparse) };
+        let theme = Theme::current();
+        assert_eq!(theme.accent, Color::Rgb(255, 0, 0));
+        assert_eq!(theme.bg, BG);
+        assert_eq!(theme.text, TEXT);
+        // No `yellow`, so emphasis borrows the accent.
+        assert_eq!(theme.strong, Color::Rgb(255, 0, 0));
+
+        // Pointing at a file that isn't there falls back wholesale.
+        unsafe { std::env::set_var("MALACLI_OMARCHY_THEME", "/nonexistent/colors.toml") };
+        let theme = Theme::current();
+        assert_eq!(theme.bg, BG);
+        assert_eq!(theme.accent, ACCENT);
+
+        // The other themes are untouched by any of this.
+        unsafe { std::env::set_var("MALACLI_THEME", "terminal") };
+        assert!(Theme::current().transparent);
+        unsafe { std::env::set_var("MALACLI_THEME", "monastic") };
+        assert_eq!(Theme::current().bg, BG);
+
+        unsafe { std::env::remove_var("MALACLI_THEME") };
+        unsafe { std::env::remove_var("MALACLI_OMARCHY_THEME") };
+        let _ = std::fs::remove_file(full);
+        let _ = std::fs::remove_file(sparse);
+    }
 }

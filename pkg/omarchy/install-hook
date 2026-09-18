@@ -1,0 +1,44 @@
+#!/bin/bash
+# Install the malacli theme-set hook on an Omarchy system.
+#
+#   ./pkg/omarchy/install-hook            install
+#   ./pkg/omarchy/install-hook --uninstall remove
+#
+# malacli reads the Omarchy palette with or without this hook; the hook only
+# makes an already-open reader recolour the instant the desktop theme changes,
+# instead of on its next redraw.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$ROOT/malacli-theme-hook"
+HOOK_DIR="$HOME/.config/omarchy/hooks/theme-set.d"
+HOOK="$HOOK_DIR/malacli-theme-hook"
+
+if [[ "${1:-}" == "--uninstall" ]]; then
+  rm -f "$HOOK" && echo "removed $HOOK"
+  exit 0
+fi
+
+# Key off the theme state rather than the presence of the `omarchy` binary:
+# what matters is that a theme has actually been applied and there is a
+# colors.toml to read.
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme"
+if [[ ! -d "$STATE" ]]; then
+  echo "no Omarchy theme found -- malacli will keep its built-in palette" >&2
+  echo "  (set MALACLI_OMARCHY_THEME to a colors.toml to theme it anyway)" >&2
+  exit 1
+fi
+
+# Prefer the official installer so Omarchy owns the file; fall back to a plain
+# copy on versions that predate `omarchy hook install`.
+if command -v omarchy >/dev/null 2>&1 &&
+   omarchy hook install theme-set "$SRC" >/dev/null 2>&1; then
+  echo "installed theme-set hook via omarchy"
+else
+  mkdir -p "$HOOK_DIR"
+  install -m 0755 "$SRC" "$HOOK"
+  echo "installed $HOOK"
+fi
+
+echo
+echo "now run:  malacli set theme omarchy"

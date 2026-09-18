@@ -1,0 +1,13 @@
+#!/bin/bash
+# Omarchy theme-set hook: nudge running malacli instances so open readers
+# recolour live.
+#
+# Omarchy calls this with the new theme's slug in $1 after `omarchy theme set`.
+# We only touch a stamp file; malacli watches its mtime and rebuilds its
+# palette from the theme's colors.toml on the next frame. Nothing is read from
+# here, so the hook stays trivial and cannot wedge a theme switch.
+set -u
+
+STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/malacli/theme-stamp"
+mkdir -p "$(dirname "$STAMP")" || exit 0
+printf '%s\n' "${1:-unknown}" >"$STAMP" 2>/dev/null || exit 0

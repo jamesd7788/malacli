@@ -925,7 +925,7 @@ fn parse_cross_references(
     }
 
     for refs in by_verse.values_mut() {
-        refs.sort_by(|left, right| right.votes.cmp(&left.votes));
+        refs.sort_by_key(|entry| std::cmp::Reverse(entry.votes));
         refs.truncate(24);
     }
 
